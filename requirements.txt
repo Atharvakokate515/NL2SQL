@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+
+psycopg2-binary
+
+langgraph
+langchain
+
+transformers
+torch
+accelerate
+
+python-dotenv
+pydantic
+
+matplotlib
+pandas
