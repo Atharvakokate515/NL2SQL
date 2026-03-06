@@ -1,4 +1,4 @@
-from langchain.output_parsers import PydanticOutputParser
+from langchain_core.output_parsers import PydanticOutputParser
 from core.db_schema import SchemaOutput
 
 

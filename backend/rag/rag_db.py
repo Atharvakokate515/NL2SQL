@@ -3,7 +3,6 @@
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from .models import Base
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -15,8 +14,15 @@ SessionLocal = sessionmaker(
     autocommit=False
 )
 
-def init_db():
+
+def init_rag_db():
+    """
+    Creates the chunks and queries tables if they don't exist.
+    Called from main.py on startup alongside memory.db.init_db().
+    """
+    from .models import Base  # noqa: F401 — registers Chunk and Query models
     Base.metadata.create_all(bind=engine)
+
 
 def get_session():
     session = SessionLocal()

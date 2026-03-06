@@ -1,6 +1,6 @@
 # rag/search.py
 
-from .db import SessionLocal
+from .rag_db import SessionLocal
 from .models import Query
 
 

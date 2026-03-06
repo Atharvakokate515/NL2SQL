@@ -7,7 +7,7 @@ from rag.embeddings import load_embeddings
 from langchain_community.vectorstores import Chroma
 
 
-# ---------- INIT VECTORSTORE (Singleton Style) ----------
+# ── Init vectorstore (singleton style) ───────────────────────────
 
 CHROMA_PATH = "./chroma_db"
 
@@ -22,93 +22,43 @@ searcher = RAGSearcher(vectorstore)
 rag_service = RAGService(searcher)
 
 
-# ---------- FOLLOW-UP DETECTOR ----------
-
-FOLLOWUP_KEYWORDS = [
-    "it",
-    "they",
-    "that",
-    "those",
-    "more",
-    "explain",
-    "elaborate",
-    "who",
-    "when",
-    "where",
-    "why",
-    "how"
-]
-
-
-def is_followup(query: str) -> bool:
-    q = query.lower()
-    return any(word in q for word in FOLLOWUP_KEYWORDS)
-
-
-# ---------- CONTEXT EXPANDER ----------
-
-def expand_query_with_history(query: str, chat_history: list[dict]) -> str:
-    """
-    Expands vague follow-up queries using past chat context.
-    """
-
-    if not chat_history:
-        return query
-
-    last_messages = chat_history[-3:]
-
-    history_text = "\n".join(
-        f"{m['role']}: {m['content']}"
-        for m in last_messages
-    )
-
-    expanded_query = f"""
-        Conversation context:
-        {history_text}
-
-        User follow-up question:
-        {query}
-
-        Rewrite the question into a standalone search query.
-        """
-
-    return expanded_query
-
-
-# ---------- MAIN TOOL ----------
+# ── Main tool ────────────────────────────────────────────────────
 
 def rag_tool(user_input: str, chat_history: list[dict] = None):
     """
-    RAG Tool
+    RAG Tool — handles both fresh queries and follow-up questions.
 
-    Handles:
-    - Fresh document queries
-    - Follow-up contextual queries
-    - Citation generation
+    Follow-up handling strategy:
+    Instead of a brittle keyword detector, we always pass the last 3 messages
+    of chat history into the RAGService prompt as context. The LLM inside
+    RAGService naturally resolves pronouns and references ("it", "that policy",
+    "the above") using the conversation context without any special detection logic.
+
+    This means:
+    - Fresh query with no history → works as before, history section is empty
+    - Follow-up like "explain that further" → LLM sees previous exchange and resolves it
+    - No false positives from keyword matching on words like "when", "who", "how"
+
+    Args:
+        user_input   : The RAG sub-task from the Copilot planner
+        chat_history : Full conversation history from the session
     """
 
     chat_history = chat_history or []
 
-    # 1️ Detect follow-up
-    if is_followup(user_input):
-        search_query = expand_query_with_history(
-            user_input,
-            chat_history
-        )
-    else:
-        search_query = user_input
+    # Pass only the last 3 exchanges (6 messages) to keep the prompt focused
+    recent_history = chat_history[-6:] if len(chat_history) > 6 else chat_history
 
-    # 2️ Run RAG retrieval + answer
     result = rag_service.answer(
-        question=search_query,
-        k=3
+        question=user_input,
+        k=3,
+        chat_history=recent_history         # passed through to RAGService prompt
     )
 
-    # 3️ Structured response for agent
     return {
         "tool": "rag",
         "success": True,
         "answer": result["answer"],
         "citations": result["citations"],
-        "context_used": search_query
+        "context_used": user_input
     }

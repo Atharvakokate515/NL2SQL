@@ -6,7 +6,7 @@ class RAGService:
         self.searcher = searcher
         self.llm = llm
 
-    def answer(self, question, k=3):
+    def answer(self, question: str, k: int = 3, chat_history: list[dict] = None):
 
         results = self.searcher.search(question, k)
 
@@ -17,14 +17,33 @@ class RAGService:
 
         if self.llm:
 
+            # Build conversation history string for follow-up awareness.
+            # If no history, this section is simply omitted from the prompt.
+            history_text = ""
+            if chat_history:
+                lines = []
+                for msg in chat_history:
+                    role = msg.get("role", "unknown").capitalize()
+                    content = msg.get("content", "")
+                    lines.append(f"{role}: {content}")
+                history_text = (
+                    "\n\nConversation History (for follow-up context):\n"
+                    + "\n".join(lines)
+                )
+
             prompt = f"""
-                Context:
-                {context}
+You are an enterprise knowledge assistant.
+Answer the question using ONLY the provided document context.
+If the question is a follow-up, use the conversation history to understand what it refers to.
+Do NOT hallucinate. If the context does not contain the answer, say so clearly.
+{history_text}
 
-                Question: {question}
+Document Context:
+{context}
 
-                Answer using only the context.
-                """
+Question: {question}
+
+Answer:"""
 
             response = self.llm.invoke(prompt)
 
@@ -35,7 +54,7 @@ class RAGService:
             )
 
         else:
-            answer = results[0]["content"][:300]
+            answer = results[0]["content"][:300] if results else "No results found."
 
         return {
             "answer": answer,
