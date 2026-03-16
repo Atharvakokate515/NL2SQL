@@ -7,7 +7,7 @@ Uses:
   - nl2sql_chat_messages   → messages for that session
   - nl2sql_session_meta    → last_sql for follow-up context
 """
-
+import uuid
 from .db import SessionLocal
 from .models import NL2SQLChatSession, NL2SQLChatMessage, NL2SQLSessionMeta
 
@@ -44,6 +44,26 @@ def _get_or_create_meta(db, session_id: str) -> NL2SQLSessionMeta:
         db.refresh(meta)
     return meta
 
+
+def create_session(title: str = "New NL2SQL Chat") -> str:
+    """
+    Create a new NL2SQL session with a server-generated UUID.
+    Returns the new session_id string.
+
+    This is the production-safe way to start a session — the server
+    owns ID generation, never the client.
+    """
+    session_id = str(uuid.uuid4())
+    db = SessionLocal()
+    try:
+        row = NL2SQLChatSession(id=session_id, title=title)
+        db.add(row)
+        meta = NL2SQLSessionMeta(session_id=session_id)
+        db.add(meta)
+        db.commit()
+    finally:
+        db.close()
+    return session_id
 
 # ─────────────────────────────────────────────────────────────────
 # Public API — last_sql

@@ -86,24 +86,18 @@ const Copilot: React.FC = () => {
   };
 
   const handleSend = async (text: string) => {
-    let currentChatId = chatId;
-    if (!currentChatId) {
-      try {
-        const res = await createChat("New Copilot Chat");
-        currentChatId = res.chat_id;
-        setChatId(currentChatId);
-      } catch {
-        toast.error("Failed to create chat");
-        return;
-      }
-    }
-
     const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text };
     setMessages((prev) => [...prev, userMsg]);
     setThinking(true);
 
     try {
-      const res = await agentChat("", text, currentChatId!);
+      const res = await agentChat("", text, chatId ?? undefined);
+
+      if (res.chat_id && !chatId) {
+        setChatId(res.chat_id);
+        fetchSessions();
+      }
+
       if (res.success) {
         const assistantMsg: Message = {
           id: crypto.randomUUID(),

@@ -22,7 +22,7 @@ const NL2SQL: React.FC = () => {
   const [connected, setConnected] = useState(false);
   const [showModal, setShowModal] = useState(true);
 
-  const [sessionId, setSessionId] = useState<string>(crypto.randomUUID());
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<NL2SQLSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -62,7 +62,7 @@ const NL2SQL: React.FC = () => {
   };
 
   const handleNewChat = () => {
-    setSessionId(crypto.randomUUID());
+    setSessionId(null);              // null = no session yet; server will assign on first send
     setMessages([]);
     setCurrentSql(null);
     setCurrentExecution(null);
@@ -149,9 +149,15 @@ const NL2SQL: React.FC = () => {
     setThinking(true);
 
     try {
-      const res = await chatDB(dbUrl, text, sessionId, clarificationResponse);
+      const res = await chatDB(dbUrl, text, sessionId ?? undefined, clarificationResponse);
 
       if (res.success) {
+        // Server always returns session_id — capture it on first message
+        if (res.session_id && !sessionId) {
+          setSessionId(res.session_id);
+          fetchSessions();          // sidebar needs to show the new session
+        }
+
         const assistantMsg: Message = {
           id: crypto.randomUUID(),
           role: "assistant",
@@ -172,6 +178,10 @@ const NL2SQL: React.FC = () => {
         setCurrentPlan(res.plan || null);
         fetchSessions();
       } else if (res.needs_clarification) {
+        // Clarification: also capture session_id since server created it
+        if (res.session_id && !sessionId) {
+          setSessionId(res.session_id);
+        }
         const clarifyMsg: Message = {
           id: crypto.randomUUID(),
           role: "clarification",

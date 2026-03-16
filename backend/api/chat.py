@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+import uuid
 
 from nl2sql.clarrifier import clarify_query
 from nl2sql.planner import plan_query
@@ -25,7 +26,7 @@ from memory.chat_store import (
 from memory.session_store import (
     get_last_sql, update_last_sql, get_chat_history, append_message,
     get_session_history_by_id, list_nl2sql_sessions, update_session_title,
-    delete_nl2sql_session,
+    delete_nl2sql_session, create_session,          # ← new import
 )
 
 
@@ -40,14 +41,14 @@ graph = build_graph()
 class NL2SQLRequest(BaseModel):
     db_url: str
     user_input: str
-    session_id: str
+    session_id: str | None = None           # FIX 2: optional — server creates if absent
     clarification_response: str | None = None
 
 
 class AgentChat(BaseModel):
     db_url: str
     user_input: str
-    chat_id: int
+    chat_id: int | None = None              # FIX 3: optional — server creates if absent
 
 
 class CreateChatRequest(BaseModel):
@@ -81,58 +82,37 @@ def _generate_result_summary(user_input: str, execution: dict) -> str:
 
 
 def _suggest_chart(execution: dict) -> dict | None:
-    """
-    Returns a structured chart suggestion dict or None.
-    Shape: { "type": "bar"|"line"|"pie"|"table", "x_axis": str|None, "y_axis": str|None }
-    Frontend uses x_axis / y_axis directly as axis labels — no guessing required.
-    """
     result = execution.get("result", {})
-
     if result.get("type") != "select":
         return None
-
     rows = result.get("rows", [])
     col_names = result.get("col_names", [])
     row_count = result.get("row_count", 0)
-
     if row_count == 0 or not rows:
         return None
 
-    # Single scalar (e.g. COUNT(*)) — no chart
-    if row_count == 1 and len(rows[0]) == 1:
-        return None
+    numeric_cols = [
+        c for c in col_names
+        if any(isinstance(row.get(c), (int, float)) for row in rows[:5])
+    ]
+    text_cols = [c for c in col_names if c not in numeric_cols]
 
-    num_cols = len(rows[0])
-    x_col = col_names[0] if col_names else None
-    y_col = col_names[1] if len(col_names) > 1 else None
-
-    # Time dimension in first column → line chart
-    first_val = str(rows[0][0]).lower() if rows[0] else ""
-    time_hints = ["date", "month", "year", "week", "quarter",
-                  "2020", "2021", "2022", "2023", "2024", "2025"]
-    if any(hint in first_val for hint in time_hints):
-        return {"type": "line", "x_axis": x_col, "y_axis": y_col}
-
-    if num_cols == 2:
-        chart_type = "pie" if row_count <= 6 else "bar"
-        return {"type": chart_type, "x_axis": x_col, "y_axis": y_col}
-
-    if num_cols >= 2:
-        return {"type": "bar", "x_axis": x_col, "y_axis": y_col}
-
+    if row_count == 1 and len(col_names) == 1:
+        return {"type": "table", "x_axis": None, "y_axis": None}
+    if len(numeric_cols) >= 1 and len(text_cols) >= 1:
+        chart_type = "pie" if row_count <= 6 and len(numeric_cols) == 1 else "bar"
+        return {"type": chart_type, "x_axis": text_cols[0], "y_axis": numeric_cols[0]}
+    if len(numeric_cols) >= 2:
+        return {"type": "line", "x_axis": numeric_cols[0], "y_axis": numeric_cols[1]}
     return {"type": "table", "x_axis": None, "y_axis": None}
 
 
 # ─────────────────────────────────────────────────────────────────
-# DB CONNECTION + SCHEMA PREVIEW
+# CONNECTION
 # ─────────────────────────────────────────────────────────────────
 
 @router.post("/test-connection")
 def test_db_connection(data: TestConnectionRequest):
-    """
-    Validate a PostgreSQL URL before the frontend opens the workspace.
-    Returns: { success, db_name, tables, error }
-    """
     try:
         test_connection(data.db_url)
         tables, db_name = get_schema_preview(data.db_url)
@@ -143,10 +123,6 @@ def test_db_connection(data: TestConnectionRequest):
 
 @router.get("/schema-preview")
 def schema_preview(db_url: str):
-    """
-    Return structured table + column list for the workspace header / inspector.
-    Returns: { success, db_name, tables: [{ name, columns, pk }] }
-    """
     try:
         tables, db_name = get_schema_preview(db_url)
         return {"success": True, "db_name": db_name, "tables": tables}
@@ -161,9 +137,13 @@ def schema_preview(db_url: str):
 @router.post("/chat-db")
 def chat_with_db(data: NL2SQLRequest):
 
+    # FIX 2: auto-create session if client didn't supply one
+    session_id = data.session_id or create_session()
+    is_new_session = data.session_id is None
+
     query = data.clarification_response or data.user_input
-    last_sql = get_last_sql(data.session_id)
-    chat_history = get_chat_history(data.session_id)
+    last_sql = get_last_sql(session_id)
+    chat_history = get_chat_history(session_id)
 
     # ── Clarifier ─────────────────────────────────────────────────
     if not data.clarification_response:
@@ -172,10 +152,12 @@ def chat_with_db(data: NL2SQLRequest):
             chat_history=chat_history, last_sql=last_sql,
         )
         if not clarification.is_clear:
-            append_message(session_id=data.session_id, role="user", content=data.user_input)
-            append_message(session_id=data.session_id, role="assistant", content=clarification.question)
+            append_message(session_id=session_id, role="user", content=data.user_input)
+            append_message(session_id=session_id, role="assistant", content=clarification.question)
             return {
                 "success": False,
+                "session_id": session_id,           # always return session_id
+                "is_new_session": is_new_session,
                 "stage": "clarification",
                 "error_code": "CLARIFICATION_NEEDED",
                 "needs_clarification": True,
@@ -183,7 +165,7 @@ def chat_with_db(data: NL2SQLRequest):
             }
 
     if not chat_history:
-        update_session_title(data.session_id, query[:60] + ("..." if len(query) > 60 else ""))
+        update_session_title(session_id, query[:60] + ("..." if len(query) > 60 else ""))
 
     # ── Planner ───────────────────────────────────────────────────
     plan = plan_query(user_input=query, db_url=data.db_url, chat_history=chat_history)
@@ -194,26 +176,45 @@ def chat_with_db(data: NL2SQLRequest):
         plan=plan, last_sql=last_sql, chat_history=chat_history,
     )
 
-    # ── Validator ─────────────────────────────────────────────────
-    validation = is_safe_sql(sql, get_table_list(data.db_url))
-    if not validation["safe"]:
-        return {
-            "success": False,
-            "stage": "validation",
-            "error_code": "VALIDATION_FAILED",
-            "error": validation["reason"],
-            "generated_sql": sql,
-        }
-
-    # ── Executor (with one retry on failure) ──────────────────────
-    execution_result = execute_sql(data.db_url, sql)
+    # ── Validator (FIX 1: retry on validation failure instead of hard-failing) ──
+    allowed_tables = get_table_list(data.db_url)
+    validation = is_safe_sql(sql, allowed_tables)
     was_retried = False
+
+    if not validation["safe"]:
+        # The LLM produced invalid SQL — give it one chance to self-correct
+        # using the validation failure reason as feedback, exactly like exec retry.
+        original_sql = sql
+        sql = generate_sql(
+            user_input=query, db_url=data.db_url,
+            plan=plan, last_sql=last_sql, chat_history=chat_history,
+            error_feedback=f"Validation failed: {validation['reason']}",
+            failed_sql=original_sql,
+        )
+        was_retried = True
+
+        # Re-validate the corrected SQL — if it still fails, give up cleanly
+        validation2 = is_safe_sql(sql, allowed_tables)
+        if not validation2["safe"]:
+            return {
+                "success": False,
+                "session_id": session_id,
+                "is_new_session": is_new_session,
+                "stage": "validation",
+                "error_code": "VALIDATION_FAILED",
+                "error": validation2["reason"],
+                "generated_sql": sql,
+                "original_sql": original_sql,
+                "was_retried": True,
+            }
+
+    # ── Executor (with one retry on execution failure) ─────────────
+    execution_result = execute_sql(data.db_url, sql)
 
     if not execution_result["success"]:
         error_msg = execution_result.get("error", "Unknown execution error")
         original_sql = sql
 
-        # Retry: show the LLM its own error so it can self-correct
         sql = generate_sql(
             user_input=query, db_url=data.db_url,
             plan=plan, last_sql=last_sql, chat_history=chat_history,
@@ -221,14 +222,16 @@ def chat_with_db(data: NL2SQLRequest):
         )
         was_retried = True
 
-        # Re-validate the corrected SQL before executing
-        validation2 = is_safe_sql(sql, get_table_list(data.db_url))
-        if not validation2["safe"]:
+        # Re-validate before re-executing the corrected SQL
+        validation_retry = is_safe_sql(sql, allowed_tables)
+        if not validation_retry["safe"]:
             return {
                 "success": False,
+                "session_id": session_id,
+                "is_new_session": is_new_session,
                 "stage": "execution",
-                "error_code": "RETRY_FAILED",
-                "error": validation2["reason"],
+                "error_code": "RETRY_VALIDATION_FAILED",
+                "error": validation_retry["reason"],
                 "generated_sql": sql,
                 "original_sql": original_sql,
                 "was_retried": True,
@@ -239,6 +242,8 @@ def chat_with_db(data: NL2SQLRequest):
         if not execution_result["success"]:
             return {
                 "success": False,
+                "session_id": session_id,
+                "is_new_session": is_new_session,
                 "stage": "execution",
                 "error_code": "RETRY_FAILED",
                 "error": execution_result.get("error"),
@@ -255,16 +260,18 @@ def chat_with_db(data: NL2SQLRequest):
         chart_suggestion = _suggest_chart(execution_result)
 
     # ── Persist ───────────────────────────────────────────────────
-    append_message(session_id=data.session_id, role="user", content=query)
-    append_message(session_id=data.session_id, role="assistant", content=sql)
-    update_last_sql(session_id=data.session_id, sql=sql)
+    append_message(session_id=session_id, role="user", content=query)
+    append_message(session_id=session_id, role="assistant", content=sql)
+    update_last_sql(session_id=session_id, sql=sql)
 
     return {
         "success": True,
+        "session_id": session_id,               # always return — client must persist this
+        "is_new_session": is_new_session,
         "stage": "complete",
         "generated_sql": sql,
         "summary": summary,
-        "chart_suggestion": chart_suggestion,   # { type, x_axis, y_axis } or None
+        "chart_suggestion": chart_suggestion,
         "was_retried": was_retried,
         "plan": {
             "intent": plan.intent_summary,
@@ -276,6 +283,17 @@ def chat_with_db(data: NL2SQLRequest):
 
 
 # ── NL2SQL session management ─────────────────────────────────────
+
+@router.post("/nl2sql-sessions")
+def create_nl2sql_session():
+    """
+    Create a new NL2SQL session server-side and return its UUID.
+    Frontend should call this before the first /chat-db message,
+    then pass the returned session_id on all subsequent messages.
+    """
+    session_id = create_session()
+    return {"success": True, "session_id": session_id}
+
 
 @router.get("/nl2sql-sessions")
 def get_nl2sql_sessions():
@@ -313,10 +331,14 @@ def create_new_chat(data: CreateChatRequest):
 
 @router.post("/agent-chat")
 def agent_chat(data: AgentChat):
-    history = load_chat_history(data.chat_id)
+    # FIX 3: auto-create chat if client didn't supply one
+    is_new_chat = data.chat_id is None
+    chat_id = data.chat_id if data.chat_id is not None else create_chat()
+
+    history = load_chat_history(chat_id)
 
     if not history:
-        update_chat_title(data.chat_id, data.user_input[:60] + ("..." if len(data.user_input) > 60 else ""))
+        update_chat_title(chat_id, data.user_input[:60] + ("..." if len(data.user_input) > 60 else ""))
 
     result = graph.invoke({
         "user_input": data.user_input,
@@ -325,11 +347,16 @@ def agent_chat(data: AgentChat):
     })
     tool_result = result["tool_result"]
 
-    save_message(chat_id=data.chat_id, role="user", content=data.user_input)
-    save_message(chat_id=data.chat_id, role="assistant",
+    save_message(chat_id=chat_id, role="user", content=data.user_input)
+    save_message(chat_id=chat_id, role="assistant",
                  content=tool_result.get("answer", ""), tool_used=tool_result.get("tool"))
 
-    return {"success": True, "response": tool_result}
+    return {
+        "success": True,
+        "chat_id": chat_id,                 # always return — client must persist this
+        "is_new_chat": is_new_chat,
+        "response": tool_result,
+    }
 
 
 # ── Copilot session management ────────────────────────────────────

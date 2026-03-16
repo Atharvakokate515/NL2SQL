@@ -21,7 +21,7 @@ export const getSchemaPreview = (db_url: string) =>
 export const chatDB = (
   db_url: string,
   user_input: string,
-  session_id: string,
+  session_id?: string,                        // optional — server creates if absent
   clarification_response?: string,
 ) =>
   request<any>("/api/chat-db", {
@@ -29,7 +29,7 @@ export const chatDB = (
     body: JSON.stringify({
       db_url,
       user_input,
-      session_id,
+      ...(session_id !== undefined ? { session_id } : {}),   // omit key if no session yet
       ...(clarification_response !== undefined ? { clarification_response } : {}),
     }),
   });
@@ -48,6 +48,9 @@ export const renameNL2SQLSession = (session_id: string, title: string) =>
 export const deleteNL2SQLSession = (session_id: string) =>
   request<any>(`/api/nl2sql-sessions/${session_id}`, { method: "DELETE" });
 
+export const createNL2SQLSession = () =>
+  request<any>("/api/nl2sql-sessions", { method: "POST" });
+
 // ─── Copilot ─────────────────────────────────────────────────────────────
 
 export const createChat = (title?: string) =>
@@ -56,10 +59,14 @@ export const createChat = (title?: string) =>
     body: JSON.stringify({ title: title ?? "New Copilot Chat" }),
   });
 
-export const agentChat = (db_url: string, user_input: string, chat_id: number) =>
+export const agentChat = (db_url: string, user_input: string, chat_id?: number) =>
   request<any>("/api/agent-chat", {
     method: "POST",
-    body: JSON.stringify({ db_url, user_input, chat_id }),
+    body: JSON.stringify({
+      db_url,
+      user_input,
+      ...(chat_id !== undefined ? { chat_id } : {}),         // omit key if no chat yet
+    }),
   });
 
 export const getCopilotSessions = () => request<any[]>("/api/copilot-sessions");
