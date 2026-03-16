@@ -1,3 +1,4 @@
+// frontend/src/pages/Copilot.tsx
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import Sidebar from "@/components/common/Sidebar";
@@ -5,7 +6,14 @@ import ChatMessage from "@/components/common/ChatMessage";
 import ChatInput from "@/components/common/ChatInput";
 import ThinkingIndicator from "@/components/common/ThinkingIndicator";
 import DocUploadModal from "@/components/copilot/DocUploadModal";
-import { createChat, agentChat, getCopilotSessions, getCopilotHistory, deleteCopilotSession } from "@/api/client";
+import {
+  createChat,
+  agentChat,
+  getCopilotSessions,
+  getCopilotHistory,
+  deleteCopilotSession,
+  renameCopilotSession,
+} from "@/api/client";
 import type { Message, CopilotSession } from "@/types";
 
 const Copilot: React.FC = () => {
@@ -37,7 +45,7 @@ const Copilot: React.FC = () => {
       setChatId(res.chat_id);
       setMessages([]);
       fetchSessions();
-    } catch (err: any) {
+    } catch {
       toast.error("Failed to create chat");
     }
   };
@@ -63,6 +71,17 @@ const Copilot: React.FC = () => {
     if (chatId === id) {
       setChatId(null);
       setMessages([]);
+    }
+  };
+
+  const handleRenameSession = async (id: string | number, title: string) => {
+    setSessions((prev) =>
+      prev.map((s) => (s.chat_id === id ? { ...s, title } : s))
+    );
+    try {
+      await renameCopilotSession(id as number, title);
+    } catch {
+      fetchSessions();
     }
   };
 
@@ -118,7 +137,11 @@ const Copilot: React.FC = () => {
     return <DocUploadModal onReady={() => setShowModal(false)} showBack />;
   }
 
-  const sidebarSessions = sessions.map((s) => ({ id: s.chat_id, title: s.title, updated_at: s.updated_at }));
+  const sidebarSessions = sessions.map((s) => ({
+    id: s.chat_id,
+    title: s.title,
+    updated_at: s.updated_at,
+  }));
 
   return (
     <div className="flex h-screen bg-background">
@@ -127,6 +150,7 @@ const Copilot: React.FC = () => {
         activeId={chatId}
         onSelect={handleSelectSession}
         onDelete={handleDeleteSession}
+        onRename={handleRenameSession}
         onNewChat={handleNewChat}
         loading={sessionsLoading}
       />
@@ -159,7 +183,11 @@ const Copilot: React.FC = () => {
           <div ref={chatEndRef} />
         </div>
 
-        <ChatInput onSend={handleSend} placeholder="Ask a question about your documents..." disabled={thinking} />
+        <ChatInput
+          onSend={handleSend}
+          placeholder="Ask a question about your documents..."
+          disabled={thinking}
+        />
       </div>
     </div>
   );

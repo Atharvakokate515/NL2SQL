@@ -64,28 +64,34 @@ def plan_query(
         "FORMAT_INSTRUCTIONS": nl2sql_planner_parser.get_format_instructions()
     })
 
-    return plan
+    return plan 
+
 
 
 if __name__ == "__main__":
-    print("── Planner Test ──")
-    db_url = "postgresql://postgres:root@localhost:5432/classicmodels"
+    # Quick test for plan_query function with schema inspection query
+    test_input = "how many tables are there"
+    test_db_url = "postgresql://postgres:root@localhost:5432/testdb"
+    test_history = []  # no prior conversation needed
 
-    # Test 1: standalone query
-    user_input = "List the names of customers who ordered products from the 'Classic Cars' product line."
-    plan = plan_query(user_input=user_input, db_url=db_url)
-    print("Intent:", plan.intent_summary)
-    print("Tables:", plan.candidate_tables)
+    try:
+        plan = plan_query(
+            user_input=test_input,
+            db_url=test_db_url,
+            chat_history=test_history
+        )
 
-    # Test 2: follow-up query
-    history = [
-        {"role": "user", "content": "show total sales by product line"},
-        {"role": "assistant", "content": "SELECT product_line, SUM(amount) FROM sales GROUP BY product_line"}
-    ]
-    plan2 = plan_query(
-        user_input="now filter that by Germany only",
-        db_url=db_url,
-        chat_history=history
-    )
-    print("\nFollow-up Intent:", plan2.intent_summary)
-    print("Tables:", plan2.candidate_tables)
+        # Print each field clearly
+        print("=== NL2SQLPlan Output ===")
+        print("Intent Summary:", plan.intent_summary)
+        print("Metrics Requested:", plan.metrics_requested)
+        print("Dimensions Requested:", plan.dimensions_requested)
+        print("Filters Detected:", plan.filters_detected)
+        print("Aggregation Required:", plan.aggregation_required)
+        print("Grouping Conceptually Required:", plan.grouping_conceptually_required)
+        print("Sorting Requested:", plan.sorting_requested)
+        print("Candidate Tables:", plan.candidate_tables)
+        print("Candidate Columns:", plan.candidate_columns)
+
+    except Exception as e:
+        print("Error while testing plan_query:", e)

@@ -14,7 +14,7 @@ import tempfile
 from fastapi import APIRouter, UploadFile, File, HTTPException
 
 from rag.ingest import RAGIngestor
-from rag.db import SessionLocal
+from rag.rag_db import SessionLocal
 from rag.models import Chunk
 
 router = APIRouter()

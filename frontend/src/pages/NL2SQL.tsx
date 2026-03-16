@@ -1,3 +1,4 @@
+// frontend/src/pages/NL2SQL.tsx
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import Sidebar from "@/components/common/Sidebar";
@@ -6,7 +7,13 @@ import ChatInput from "@/components/common/ChatInput";
 import ThinkingIndicator from "@/components/common/ThinkingIndicator";
 import DBConnectionModal from "@/components/nl2sql/DBConnectionModal";
 import ResultsPanel from "@/components/nl2sql/ResultsPanel";
-import { chatDB, getNL2SQLSessions, getSessionHistory, deleteNL2SQLSession } from "@/api/client";
+import {
+  chatDB,
+  getNL2SQLSessions,
+  getSessionHistory,
+  deleteNL2SQLSession,
+  renameNL2SQLSession,
+} from "@/api/client";
 import type { Message, NL2SQLSession, ExecutionResult, ChartSuggestion, Plan } from "@/types";
 
 const NL2SQL: React.FC = () => {
@@ -21,7 +28,9 @@ const NL2SQL: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [thinking, setThinking] = useState(false);
 
-  // Results panel state
+  // Track which clarification message IDs have been submitted so we disable them
+  const [submittedClarifications, setSubmittedClarifications] = useState<Set<string>>(new Set());
+
   const [currentSql, setCurrentSql] = useState<string | null>(null);
   const [currentExecution, setCurrentExecution] = useState<ExecutionResult | null>(null);
   const [currentChart, setCurrentChart] = useState<ChartSuggestion | null>(null);
@@ -59,6 +68,7 @@ const NL2SQL: React.FC = () => {
     setCurrentExecution(null);
     setCurrentChart(null);
     setCurrentPlan(null);
+    setSubmittedClarifications(new Set());
   };
 
   const handleSelectSession = async (id: string | number) => {
@@ -75,7 +85,8 @@ const NL2SQL: React.FC = () => {
       setCurrentExecution(null);
       setCurrentChart(null);
       setCurrentPlan(null);
-    } catch (err: any) {
+      setSubmittedClarifications(new Set());
+    } catch {
       toast.error("Failed to load session");
     }
   };
@@ -86,9 +97,55 @@ const NL2SQL: React.FC = () => {
     if (sessionId === id) handleNewChat();
   };
 
-  const handleSend = async (text: string, clarificationResponse?: string) => {
-    const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text };
-    if (!clarificationResponse) setMessages((prev) => [...prev, userMsg]);
+  const handleRenameSession = async (id: string | number, title: string) => {
+    setSessions((prev) =>
+      prev.map((s) => (s.session_id === id ? { ...s, title } : s))
+    );
+    try {
+      await renameNL2SQLSession(id as string, title);
+    } catch {
+      fetchSessions();
+    }
+  };
+
+  /**
+   * Core send function.
+   *
+   * Called in two modes:
+   *   1. Fresh query:        handleSend(userText)
+   *   2. Clarification reply: handleSend(originalInput, clarificationMsgId, clarifyText)
+   *
+   * In mode 2 the API receives:
+   *   user_input            = originalInput   (the query that triggered clarification)
+   *   clarification_response = clarifyText    (what the user typed in the clarification box)
+   *
+   * The clarification reply is shown as a user bubble, and the clarification
+   * card is locked so the user can't submit it twice.
+   */
+  const handleSend = async (
+    text: string,
+    clarificationMsgId?: string,
+    clarificationResponse?: string,
+  ) => {
+    if (clarificationResponse) {
+      // Show the user's clarification reply as a regular user message
+      const replyMsg: Message = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: clarificationResponse,
+      };
+      setMessages((prev) => [...prev, replyMsg]);
+
+      // Lock the clarification card so it can't be resubmitted
+      if (clarificationMsgId) {
+        setSubmittedClarifications((prev) => new Set(prev).add(clarificationMsgId));
+      }
+    } else {
+      // Normal user message
+      const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text };
+      setMessages((prev) => [...prev, userMsg]);
+    }
+
     setThinking(true);
 
     try {
@@ -119,6 +176,7 @@ const NL2SQL: React.FC = () => {
           id: crypto.randomUUID(),
           role: "clarification",
           content: res.question || "Could you clarify?",
+          // Store the ORIGINAL query so the backend gets it back in user_input
           metadata: { question: res.question, originalInput: text },
         };
         setMessages((prev) => [...prev, clarifyMsg]);
@@ -138,8 +196,17 @@ const NL2SQL: React.FC = () => {
     setThinking(false);
   };
 
-  const handleClarification = (originalInput: string) => (response: string) => {
-    handleSend(originalInput, response);
+  /**
+   * Called by ChatMessage when the user submits the clarification inline form.
+   * msg.id      → the clarification card's message ID (used to lock it)
+   * originalInput → the original query stored in msg.metadata
+   * response    → what the user typed in the clarification box
+   */
+  const handleClarificationSubmit = (
+    clarificationMsgId: string,
+    originalInput: string,
+  ) => (response: string) => {
+    handleSend(originalInput, clarificationMsgId, response);
   };
 
   const handleMouseDown = () => { dragging.current = true; };
@@ -166,7 +233,11 @@ const NL2SQL: React.FC = () => {
     return <DBConnectionModal onConnected={handleConnected} showBack />;
   }
 
-  const sidebarSessions = sessions.map((s) => ({ id: s.session_id, title: s.title, updated_at: s.updated_at }));
+  const sidebarSessions = sessions.map((s) => ({
+    id: s.session_id,
+    title: s.title,
+    updated_at: s.updated_at,
+  }));
 
   return (
     <div className="flex h-screen bg-background">
@@ -175,6 +246,7 @@ const NL2SQL: React.FC = () => {
         activeId={sessionId}
         onSelect={handleSelectSession}
         onDelete={handleDeleteSession}
+        onRename={handleRenameSession}
         onNewChat={handleNewChat}
         loading={sessionsLoading}
       />
@@ -197,7 +269,10 @@ const NL2SQL: React.FC = () => {
         {/* Main area */}
         <div id="nl2sql-main" className="flex-1 flex flex-col min-h-0">
           {/* Chat */}
-          <div className="overflow-y-auto scrollbar-thin p-4 space-y-4" style={{ height: `${dividerPos}%` }}>
+          <div
+            className="overflow-y-auto scrollbar-thin p-4 space-y-4"
+            style={{ height: `${dividerPos}%` }}
+          >
             {messages.length === 0 && (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                 Ask a question about your data to get started
@@ -208,7 +283,9 @@ const NL2SQL: React.FC = () => {
                 key={msg.id}
                 message={msg}
                 onClarificationSubmit={
-                  msg.role === "clarification" ? handleClarification(msg.metadata?.originalInput || "") : undefined
+                  msg.role === "clarification" && !submittedClarifications.has(msg.id)
+                    ? handleClarificationSubmit(msg.id, msg.metadata?.originalInput || "")
+                    : undefined
                 }
               />
             ))}
@@ -216,7 +293,11 @@ const NL2SQL: React.FC = () => {
             <div ref={chatEndRef} />
           </div>
 
-          <ChatInput onSend={(t) => handleSend(t)} placeholder="Ask a question about your data..." disabled={thinking} />
+          <ChatInput
+            onSend={(t) => handleSend(t)}
+            placeholder="Ask a question about your data..."
+            disabled={thinking}
+          />
 
           {/* Divider */}
           <div
@@ -226,7 +307,12 @@ const NL2SQL: React.FC = () => {
 
           {/* Results */}
           <div style={{ height: `${100 - dividerPos}%` }} className="min-h-0">
-            <ResultsPanel sql={currentSql} execution={currentExecution} chart={currentChart} plan={currentPlan} />
+            <ResultsPanel
+              sql={currentSql}
+              execution={currentExecution}
+              chart={currentChart}
+              plan={currentPlan}
+            />
           </div>
         </div>
       </div>

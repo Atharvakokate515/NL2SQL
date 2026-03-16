@@ -1,17 +1,56 @@
+# fastapi
+# uvicorn
+
+# psycopg2-binary
+
+# langgraph
+# langchain
+
+# transformers
+# torch
+# accelerate
+
+# python-dotenv
+# pydantic
+
+# matplotlib
+# pandas
+
+# backend/requirements.txt
+# ── Web framework ──────────────────────────────────────────────────────────
 fastapi
-uvicorn
+uvicorn[standard]
+python-multipart          # required for FastAPI file uploads (UploadFile)
 
-psycopg2-binary
+# ── Database ───────────────────────────────────────────────────────────────
+psycopg2-binary           # PostgreSQL driver
+sqlalchemy                # ORM used by memory/ and rag/
 
-langgraph
+# ── LLM & LangChain ────────────────────────────────────────────────────────
 langchain
+langchain-core
+langchain-community       # HuggingFaceEmbeddings, Chroma vectorstore
+langchain-text-splitters  # RecursiveCharacterTextSplitter
+langchain-huggingface     # HuggingFaceEndpoint + ChatHuggingFace (llm/client.py)
+langgraph                 # graph/ pipeline
 
-transformers
-torch
-accelerate
+# ── HuggingFace inference ──────────────────────────────────────────────────
+huggingface-hub           # API token auth, model downloads
+transformers              # tokenizers + model loading
+torch                     # required by transformers
+accelerate                # faster model loading (used in requirements already)
+sentence-transformers     # SentenceTransformer used in practice.py / embeddings
 
-python-dotenv
-pydantic
+# ── Vector store ───────────────────────────────────────────────────────────
+chromadb                  # rag/rag_db.py, rag/ingest.py
 
+# ── PDF processing ─────────────────────────────────────────────────────────
+pypdf                     # PdfReader used in rag/ingest.py
+
+# ── Utilities ──────────────────────────────────────────────────────────────
+python-dotenv             # load_dotenv() in llm/client.py
+pydantic                  # request/response models throughout
+
+# ── Visualisation (used in visualization/charts.py) ────────────────────────
 matplotlib
 pandas

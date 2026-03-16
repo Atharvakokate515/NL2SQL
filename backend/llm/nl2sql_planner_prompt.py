@@ -32,5 +32,23 @@ not just the isolated current message.
 ### CURRENT USER QUERY:
 {user_input}
 
+You must return ONLY valid JSON.
+Do not include explanations, markdown, or code blocks.
+Return only the JSON object.
+
+Example output:
+
+{{
+ "intent_summary": "User wants total sales per region",
+ "metrics_requested": ["sales"],
+ "dimensions_requested": ["region"],
+ "filters_detected": [],
+ "aggregation_required": true,
+ "grouping_conceptually_required": true,
+ "sorting_requested": false,
+ "candidate_tables": ["orders"],
+ "candidate_columns": {{"orders": ["region","sales"]}}
+}}
+
 {FORMAT_INSTRUCTIONS}
 """

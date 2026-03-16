@@ -1,91 +1,70 @@
-# backend/nl2sql/planner.py
+# backend/llm/synthesis_prompt.py
 
-from langchain_core.prompts import PromptTemplate
+SYNTHESIS_PROMPT = """
+You are an enterprise data copilot. Answer the user's question using the SQL query results
+and document context provided below.
 
-from llm.client import llm
-from llm.nl2sql_planner_prompt import NL2SQL_PLANNER_PROMPT
-from llm.nl2sql_planner_parser import nl2sql_planner_parser
+Rules:
+- Be concise and direct. Lead with the answer, then supporting detail.
+- If SQL data is available, use specific numbers and figures from it.
+- If document context is available, reference it to explain policies, thresholds, or procedures.
+- If both are available, synthesize them into a single coherent answer.
+- If citations are provided, mention the source where relevant (e.g. "According to [source]...").
+- If the data is insufficient to answer, say so clearly — do not hallucinate.
+- Do NOT mention SQL, queries, tables, or technical implementation details.
+- Write in plain business English.
 
-from core.nl2sql_schema import NL2SQLPlan
+---
 
-from db.schema import get_schema
-from db.schema_descriptions import generate_schema_descriptions
+User Question:
+{user_query}
 
+---
 
-def _format_chat_history(history: list[dict]) -> str:
-    if not history:
-        return "No prior conversation."
-    lines = []
-    for msg in history:
-        role = msg.get("role", "unknown").capitalize()
-        content = msg.get("content", "")
-        lines.append(f"{role}: {content}")
-    return "\n".join(lines)
+SQL Query Results:
+{sql_results}
 
+---
 
-def plan_query(
-    user_input: str,
-    db_url: str,
-    chat_history: list[dict] | None = None
-) -> NL2SQLPlan:
-    """
-    Produces a structured NL2SQLPlan from a user query.
+Document Context:
+{rag_context}
 
-    Now accepts chat_history (last 2-3 messages) so the planner can correctly
-    resolve follow-up queries into accurate candidate tables and columns,
-    rather than treating vague follow-ups as standalone ambiguous queries.
+---
 
-    Args:
-        user_input   : The (possibly clarified) user query
-        db_url       : Target database connection string
-        chat_history : Recent conversation messages for follow-up context
+Citations:
+{citations}
 
-    Returns:
-        NL2SQLPlan with intent, metrics, dimensions, filters, tables, columns etc.
-    """
+---
 
-    raw_schema = get_schema(db_url)
-    schema = generate_schema_descriptions(raw_schema)
-
-    # Only pass last 3 exchanges (6 messages) — enough context, not too noisy
-    recent_history = chat_history[-6:] if chat_history and len(chat_history) > 6 else (chat_history or [])
-
-    prompt = PromptTemplate(
-        template=NL2SQL_PLANNER_PROMPT,
-        input_variables=["user_input", "schema", "chat_history", "FORMAT_INSTRUCTIONS"]
-    )
-
-    chain = prompt | llm | nl2sql_planner_parser
-
-    plan = chain.invoke({
-        "user_input": user_input,
-        "schema": schema,
-        "chat_history": _format_chat_history(recent_history),
-        "FORMAT_INSTRUCTIONS": nl2sql_planner_parser.get_format_instructions()
-    })
-
-    return plan
+Your answer:
+"""
 
 
-if __name__ == "__main__":
-    print("── Planner Test ──")
-    db_url = "postgresql://postgres:root@localhost:5432/classicmodels"
-
-    # Test 1: standalone query
-    user_input = "List the names of customers who ordered products from the 'Classic Cars' product line."
-    plan = plan_query(user_input=user_input, db_url=db_url)
-    print("Intent:", plan.intent_summary)
-    print("Tables:", plan.candidate_tables)
-
-    # Test 2: follow-up query
-    history = [
-        {"role": "user", "content": "show total sales by product line"},
-        {"role": "assistant", "content": "SELECT product_line, SUM(amount) FROM sales GROUP BY product_line"}
-    ]
-    plan2 = plan_query(
-        user_input="now filter that by Germany only",
-        db_url=db_url,
-        chat_history=history
-    )
-    print("\nFollow-up Intent:", plan2.intent_summary)
-    print("Tables:", plan2.candidate_tables)
+# ── REASONING PROMPT (commented out) ─────────────────────────────
+# Uncomment when enabling the reasoning layer in graph/reasoning_node.py.
+# Requires Claude Sonnet/Opus or GPT-4 for reliable structured JSON output.
+#
+# REASONING_PROMPT = """
+# You are an analytical reasoning engine for an enterprise data copilot.
+#
+# You will receive:
+# 1. SQL query results — structured data from the database
+# 2. RAG document context — relevant passages from uploaded documents
+#
+# Your job is to perform intermediate structured analysis BEFORE the final answer is written.
+# Extract key metrics, match them to document thresholds, and identify risks or findings.
+#
+# Output ONLY a valid JSON object with this structure:
+# {{
+#   "metrics": {{"metric_name": value, ...}},
+#   "thresholds": {{"threshold_name": value, ...}},
+#   "comparisons": [{{"metric": "...", "threshold": "...", "status": "ok|breach|warning", "detail": "..."}}],
+#   "trends": [{{"label": "...", "direction": "up|down|stable", "detail": "..."}}],
+#   "missing_data": ["list of any data that was needed but not found"]
+# }}
+#
+# User Question: {user_query}
+# SQL Results: {sql_results}
+# Document Context: {rag_context}
+# """
+# ─────────────────────────────────────────────────────────────────

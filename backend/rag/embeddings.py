@@ -1,6 +1,9 @@
 # rag/embeddings.py
-
-from langchain_community.embeddings import HuggingFaceEmbeddings
+#---------------------------------------------------------------
+# depriciated
+#`pip install -U `langchain-huggingface` and import as `from `langchain_huggingface import HuggingFaceEmbeddings``
+#---------------------------------------------------------------------------------
+from langchain_huggingface import HuggingFaceEmbeddings
 
 def load_embeddings(device="cpu"):
 

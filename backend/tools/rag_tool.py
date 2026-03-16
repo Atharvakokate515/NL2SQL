@@ -4,7 +4,7 @@ from rag.search import RAGSearcher
 from rag.rag_services import RAGService
 from rag.embeddings import load_embeddings
 
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 
 
 # ── Init vectorstore (singleton style) ───────────────────────────

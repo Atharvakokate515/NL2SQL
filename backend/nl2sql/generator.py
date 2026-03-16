@@ -111,9 +111,17 @@ if __name__ == "__main__":
     from nl2sql.planner import plan_query
 
     print("── Generator Test ──")
-    user_input = "List the names of customers who ordered products from the 'Classic Cars' product line."
+    user_input = "how many tables are there"
     db_url = "postgresql://postgres:root@localhost:5432/classicmodels"
 
     plan = plan_query(user_input=user_input, db_url=db_url)
+
+    print("==="*30)
+    print("this is the plan intent   ---> ",plan.intent_summary)
+    print("==="*30)
+    print("this is the columns   ---> ",plan.candidate_columns)
+    print("==="*30)
+    print("this is the tables   ---> ",plan.candidate_tables)
+    print("=="*40)
     sql = generate_sql(user_input=user_input, db_url=db_url, plan=plan)
     print("\nSQL:", sql)

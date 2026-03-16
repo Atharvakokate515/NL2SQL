@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from pypdf import PdfReader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 
 from .embeddings import load_embeddings
 from .rag_db import SessionLocal
@@ -136,14 +136,18 @@ class RAGIngestor:
 
         with ThreadPoolExecutor(max_workers=8) as executor:
             results = list(executor.map(self._process_page, enumerate(reader.pages)))
+        
+        chunk_counter = 0
 
         for page_chunks in results:
             for chunk, page_num in page_chunks:
-                doc_id = f"{source}_{page_num}_{timestamp}"
+                doc_id = f"{source}_{page_num}_{chunk_counter}_{timestamp}"
                 texts.append(chunk)
                 metadatas.append({"source": source, "page": page_num})
                 ids.append(doc_id)
+                chunk_counter += 1
 
+        # After all chunks are collected
         if not texts:
             return {"source": source, "status": "empty", "chunks_added": 0}
 

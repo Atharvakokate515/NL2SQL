@@ -1,12 +1,20 @@
-# rag/db.py
+# backend/rag/rag_db.py
+# Uses SQLite by default — no setup needed, file is auto-created on first run.
+# Override by setting DATABASE_URL in backend/.env (e.g. for production postgres)
 
 import os
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+load_dotenv()
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./rag.db")
+
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+)
 
 SessionLocal = sessionmaker(
     bind=engine,
@@ -16,11 +24,7 @@ SessionLocal = sessionmaker(
 
 
 def init_rag_db():
-    """
-    Creates the chunks and queries tables if they don't exist.
-    Called from main.py on startup alongside memory.db.init_db().
-    """
-    from .models import Base  # noqa: F401 — registers Chunk and Query models
+    from .models import Base  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
 

@@ -1,12 +1,20 @@
 # backend/memory/db.py
+# Uses SQLite by default — no setup needed, file is auto-created on first run.
+# Override by setting DATABASE_URL in backend/.env (e.g. for production postgres)
 
 import os
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+load_dotenv()
 
-engine = create_engine(DATABASE_URL)
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
+
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+)
 
 SessionLocal = sessionmaker(
     bind=engine,
@@ -16,12 +24,7 @@ SessionLocal = sessionmaker(
 
 
 def init_db():
-    """
-    Creates all tables defined in models.py if they don't exist yet.
-    Call this once on app startup from main.py.
-    """
-    # Import here to ensure all models are registered with Base before create_all
-    from .models import Base  # noqa: F401 — side-effect import registers all models
+    from .models import Base  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
 
