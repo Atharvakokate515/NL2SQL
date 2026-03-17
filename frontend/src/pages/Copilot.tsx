@@ -6,6 +6,7 @@ import ChatMessage from "@/components/common/ChatMessage";
 import ChatInput from "@/components/common/ChatInput";
 import ThinkingIndicator from "@/components/common/ThinkingIndicator";
 import DocUploadModal from "@/components/copilot/DocUploadModal";
+import { useAppContext } from "@/context/AppContext";
 import {
   createChat,
   agentChat,
@@ -17,7 +18,11 @@ import {
 import type { Message, CopilotSession } from "@/types";
 
 const Copilot: React.FC = () => {
-  const [showModal, setShowModal] = useState(true);
+  const { docsReady, setDocsReady } = useAppContext();
+
+  // Show modal only if docs haven't been confirmed ready yet
+  const [showModal, setShowModal] = useState(!docsReady);
+
   const [chatId, setChatId] = useState<number | null>(null);
   const [sessions, setSessions] = useState<CopilotSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
@@ -38,6 +43,11 @@ const Copilot: React.FC = () => {
 
   useEffect(() => { if (!showModal) fetchSessions(); }, [showModal, fetchSessions]);
   useEffect(scrollToBottom, [messages, thinking]);
+
+  const handleReady = () => {
+    setDocsReady(true);
+    setShowModal(false);
+  };
 
   const handleNewChat = async () => {
     try {
@@ -68,36 +78,33 @@ const Copilot: React.FC = () => {
   const handleDeleteSession = async (id: string | number) => {
     setSessions((prev) => prev.filter((s) => s.chat_id !== id));
     try { await deleteCopilotSession(id as number); } catch { fetchSessions(); }
-    if (chatId === id) {
-      setChatId(null);
-      setMessages([]);
-    }
+    if (chatId === id) { setChatId(null); setMessages([]); }
   };
 
   const handleRenameSession = async (id: string | number, title: string) => {
-    setSessions((prev) =>
-      prev.map((s) => (s.chat_id === id ? { ...s, title } : s))
-    );
-    try {
-      await renameCopilotSession(id as number, title);
-    } catch {
-      fetchSessions();
-    }
+    setSessions((prev) => prev.map((s) => (s.chat_id === id ? { ...s, title } : s)));
+    try { await renameCopilotSession(id as number, title); } catch { fetchSessions(); }
   };
 
   const handleSend = async (text: string) => {
+    let currentChatId = chatId;
+    if (!currentChatId) {
+      try {
+        const res = await createChat("New Copilot Chat");
+        currentChatId = res.chat_id;
+        setChatId(currentChatId);
+      } catch {
+        toast.error("Failed to create chat");
+        return;
+      }
+    }
+
     const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text };
     setMessages((prev) => [...prev, userMsg]);
     setThinking(true);
 
     try {
-      const res = await agentChat("", text, chatId ?? undefined);
-
-      if (res.chat_id && !chatId) {
-        setChatId(res.chat_id);
-        fetchSessions();
-      }
-
+      const res = await agentChat("", text, currentChatId!);
       if (res.success) {
         const assistantMsg: Message = {
           id: crypto.randomUUID(),
@@ -128,7 +135,14 @@ const Copilot: React.FC = () => {
   };
 
   if (showModal) {
-    return <DocUploadModal onReady={() => setShowModal(false)} showBack />;
+    return (
+      <DocUploadModal
+        onReady={handleReady}
+        // If docs were already confirmed, allow cancelling back to chat
+        onClose={docsReady ? () => setShowModal(false) : undefined}
+        showBack={!docsReady}
+      />
+    );
   }
 
   const sidebarSessions = sessions.map((s) => ({
@@ -150,7 +164,6 @@ const Copilot: React.FC = () => {
       />
 
       <div className="flex flex-col flex-1 min-w-0">
-        {/* Top bar */}
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-card/50">
           <h2 className="text-sm font-medium text-foreground truncate">
             {sessions.find((s) => s.chat_id === chatId)?.title || "New Chat"}
@@ -163,7 +176,6 @@ const Copilot: React.FC = () => {
           </button>
         </div>
 
-        {/* Chat */}
         <div className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-4">
           {messages.length === 0 && (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">

@@ -7,6 +7,7 @@ import ChatInput from "@/components/common/ChatInput";
 import ThinkingIndicator from "@/components/common/ThinkingIndicator";
 import DBConnectionModal from "@/components/nl2sql/DBConnectionModal";
 import ResultsPanel from "@/components/nl2sql/ResultsPanel";
+import { useAppContext } from "@/context/AppContext";
 import {
   chatDB,
   getNL2SQLSessions,
@@ -17,18 +18,16 @@ import {
 import type { Message, NL2SQLSession, ExecutionResult, ChartSuggestion, Plan } from "@/types";
 
 const NL2SQL: React.FC = () => {
-  const [dbUrl, setDbUrl] = useState("");
-  const [dbName, setDbName] = useState("");
-  const [connected, setConnected] = useState(false);
-  const [showModal, setShowModal] = useState(true);
+  const { dbUrl, dbName, connected, setDb } = useAppContext();
+
+  // Show modal only if not yet connected
+  const [showModal, setShowModal] = useState(!connected);
 
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<NL2SQLSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [thinking, setThinking] = useState(false);
-
-  // Track which clarification message IDs have been submitted so we disable them
   const [submittedClarifications, setSubmittedClarifications] = useState<Set<string>>(new Set());
 
   const [currentSql, setCurrentSql] = useState<string | null>(null);
@@ -55,14 +54,12 @@ const NL2SQL: React.FC = () => {
   useEffect(scrollToBottom, [messages, thinking]);
 
   const handleConnected = (url: string, name: string, _tables: string[]) => {
-    setDbUrl(url);
-    setDbName(name);
-    setConnected(true);
+    setDb(url, name);
     setShowModal(false);
   };
 
   const handleNewChat = () => {
-    setSessionId(null);              // null = no session yet; server will assign on first send
+    setSessionId(null);
     setMessages([]);
     setCurrentSql(null);
     setCurrentExecution(null);
@@ -98,50 +95,25 @@ const NL2SQL: React.FC = () => {
   };
 
   const handleRenameSession = async (id: string | number, title: string) => {
-    setSessions((prev) =>
-      prev.map((s) => (s.session_id === id ? { ...s, title } : s))
-    );
-    try {
-      await renameNL2SQLSession(id as string, title);
-    } catch {
-      fetchSessions();
-    }
+    setSessions((prev) => prev.map((s) => (s.session_id === id ? { ...s, title } : s)));
+    try { await renameNL2SQLSession(id as string, title); } catch { fetchSessions(); }
   };
 
-  /**
-   * Core send function.
-   *
-   * Called in two modes:
-   *   1. Fresh query:        handleSend(userText)
-   *   2. Clarification reply: handleSend(originalInput, clarificationMsgId, clarifyText)
-   *
-   * In mode 2 the API receives:
-   *   user_input            = originalInput   (the query that triggered clarification)
-   *   clarification_response = clarifyText    (what the user typed in the clarification box)
-   *
-   * The clarification reply is shown as a user bubble, and the clarification
-   * card is locked so the user can't submit it twice.
-   */
   const handleSend = async (
     text: string,
     clarificationMsgId?: string,
     clarificationResponse?: string,
   ) => {
-    if (clarificationResponse) {
-      // Show the user's clarification reply as a regular user message
-      const replyMsg: Message = {
-        id: crypto.randomUUID(),
-        role: "user",
-        content: clarificationResponse,
-      };
-      setMessages((prev) => [...prev, replyMsg]);
+    const currentSessionId = sessionId ?? crypto.randomUUID();
+    if (!sessionId) setSessionId(currentSessionId);
 
-      // Lock the clarification card so it can't be resubmitted
+    if (clarificationResponse) {
+      const replyMsg: Message = { id: crypto.randomUUID(), role: "user", content: clarificationResponse };
+      setMessages((prev) => [...prev, replyMsg]);
       if (clarificationMsgId) {
         setSubmittedClarifications((prev) => new Set(prev).add(clarificationMsgId));
       }
     } else {
-      // Normal user message
       const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text };
       setMessages((prev) => [...prev, userMsg]);
     }
@@ -149,15 +121,9 @@ const NL2SQL: React.FC = () => {
     setThinking(true);
 
     try {
-      const res = await chatDB(dbUrl, text, sessionId ?? undefined, clarificationResponse);
+      const res = await chatDB(dbUrl, text, currentSessionId, clarificationResponse);
 
       if (res.success) {
-        // Server always returns session_id — capture it on first message
-        if (res.session_id && !sessionId) {
-          setSessionId(res.session_id);
-          fetchSessions();          // sidebar needs to show the new session
-        }
-
         const assistantMsg: Message = {
           id: crypto.randomUUID(),
           role: "assistant",
@@ -178,15 +144,10 @@ const NL2SQL: React.FC = () => {
         setCurrentPlan(res.plan || null);
         fetchSessions();
       } else if (res.needs_clarification) {
-        // Clarification: also capture session_id since server created it
-        if (res.session_id && !sessionId) {
-          setSessionId(res.session_id);
-        }
         const clarifyMsg: Message = {
           id: crypto.randomUUID(),
           role: "clarification",
           content: res.question || "Could you clarify?",
-          // Store the ORIGINAL query so the backend gets it back in user_input
           metadata: { question: res.question, originalInput: text },
         };
         setMessages((prev) => [...prev, clarifyMsg]);
@@ -206,12 +167,6 @@ const NL2SQL: React.FC = () => {
     setThinking(false);
   };
 
-  /**
-   * Called by ChatMessage when the user submits the clarification inline form.
-   * msg.id      → the clarification card's message ID (used to lock it)
-   * originalInput → the original query stored in msg.metadata
-   * response    → what the user typed in the clarification box
-   */
   const handleClarificationSubmit = (
     clarificationMsgId: string,
     originalInput: string,
@@ -240,7 +195,14 @@ const NL2SQL: React.FC = () => {
   }, [handleMouseMove, handleMouseUp]);
 
   if (showModal) {
-    return <DBConnectionModal onConnected={handleConnected} showBack />;
+    return (
+      <DBConnectionModal
+        onConnected={handleConnected}
+        // If already connected, show a cancel button to go back without changing anything
+        onClose={connected ? () => setShowModal(false) : undefined}
+        showBack={!connected}
+      />
+    );
   }
 
   const sidebarSessions = sessions.map((s) => ({
@@ -262,7 +224,6 @@ const NL2SQL: React.FC = () => {
       />
 
       <div className="flex flex-col flex-1 min-w-0">
-        {/* Top bar */}
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-card/50">
           <h2 className="text-sm font-medium text-foreground truncate">
             {sessions.find((s) => s.session_id === sessionId)?.title || "New Chat"}
@@ -276,9 +237,7 @@ const NL2SQL: React.FC = () => {
           </button>
         </div>
 
-        {/* Main area */}
         <div id="nl2sql-main" className="flex-1 flex flex-col min-h-0">
-          {/* Chat */}
           <div
             className="overflow-y-auto scrollbar-thin p-4 space-y-4"
             style={{ height: `${dividerPos}%` }}
@@ -309,13 +268,11 @@ const NL2SQL: React.FC = () => {
             disabled={thinking}
           />
 
-          {/* Divider */}
           <div
             onMouseDown={handleMouseDown}
             className="h-1.5 bg-border hover:bg-primary/40 cursor-row-resize transition-colors shrink-0"
           />
 
-          {/* Results */}
           <div style={{ height: `${100 - dividerPos}%` }} className="min-h-0">
             <ResultsPanel
               sql={currentSql}

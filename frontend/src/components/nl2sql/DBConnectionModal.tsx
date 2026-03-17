@@ -1,16 +1,21 @@
+// frontend/src/components/nl2sql/DBConnectionModal.tsx
 import React, { useState } from "react";
-import { ArrowLeft, Database, Loader2 } from "lucide-react";
+import { ArrowLeft, Database, Loader2, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import Modal from "@/components/common/Modal";
 import { testConnection } from "@/api/client";
 
 interface DBConnectionModalProps {
   onConnected: (dbUrl: string, dbName: string, tables: string[]) => void;
-  onClose?: () => void;
-  showBack?: boolean;
+  onClose?: () => void;   // if provided → show Cancel button instead of Back to Home
+  showBack?: boolean;     // if true → show Back to Home (first-time flow)
 }
 
-const DBConnectionModal: React.FC<DBConnectionModalProps> = ({ onConnected, onClose, showBack = true }) => {
+const DBConnectionModal: React.FC<DBConnectionModalProps> = ({
+  onConnected,
+  onClose,
+  showBack = true,
+}) => {
   const navigate = useNavigate();
   const [host, setHost] = useState("localhost");
   const [port, setPort] = useState("5432");
@@ -39,39 +44,84 @@ const DBConnectionModal: React.FC<DBConnectionModalProps> = ({ onConnected, onCl
     }
   };
 
-  const inputClass = "w-full bg-muted border border-border rounded-lg px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all duration-200";
+  const inputClass =
+    "w-full bg-muted border border-border rounded-lg px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all duration-200";
 
   return (
     <Modal title="Connect to Database" onClose={onClose}>
-      {showBack && (
-        <button onClick={() => navigate("/")} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mb-4 transition-colors">
+      {/* Back to home — first time only */}
+      {showBack && !onClose && (
+        <button
+          onClick={() => navigate("/")}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mb-4 transition-colors"
+        >
           <ArrowLeft size={14} /> Back to home
         </button>
       )}
+
+      {/* Cancel — when already connected and just changing */}
+      {onClose && (
+        <button
+          onClick={onClose}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mb-4 transition-colors"
+        >
+          <X size={14} /> Cancel
+        </button>
+      )}
+
       <form onSubmit={handleConnect} className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Host</label>
-            <input value={host} onChange={(e) => setHost(e.target.value)} placeholder="localhost" className={inputClass} />
+            <input
+              value={host}
+              onChange={(e) => setHost(e.target.value)}
+              placeholder="localhost"
+              className={inputClass}
+            />
           </div>
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Port</label>
-            <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="5432" className={inputClass} />
+            <input
+              value={port}
+              onChange={(e) => setPort(e.target.value)}
+              placeholder="5432"
+              className={inputClass}
+            />
           </div>
         </div>
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Database</label>
-          <input value={database} onChange={(e) => setDatabase(e.target.value)} placeholder="mydb" className={inputClass} />
+          <input
+            value={database}
+            onChange={(e) => setDatabase(e.target.value)}
+            placeholder="mydb"
+            className={inputClass}
+          />
         </div>
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Username</label>
-          <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="postgres" className={inputClass} />
+          <input
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="postgres"
+            className={inputClass}
+          />
         </div>
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Password</label>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className={inputClass} />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className={inputClass}
+          />
         </div>
-        {error && <p className="text-sm text-destructive bg-destructive/10 rounded-lg px-3 py-2">{error}</p>}
+        {error && (
+          <p className="text-sm text-destructive bg-destructive/10 rounded-lg px-3 py-2">
+            {error}
+          </p>
+        )}
         <button
           type="submit"
           disabled={loading || !database}
