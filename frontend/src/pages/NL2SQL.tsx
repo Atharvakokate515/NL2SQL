@@ -1,285 +1,190 @@
-// frontend/src/pages/NL2SQL.tsx
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { toast } from "sonner";
-import Sidebar from "@/components/common/Sidebar";
-import ChatMessage from "@/components/common/ChatMessage";
-import ChatInput from "@/components/common/ChatInput";
-import ThinkingIndicator from "@/components/common/ThinkingIndicator";
-import DBConnectionModal from "@/components/nl2sql/DBConnectionModal";
-import ResultsPanel from "@/components/nl2sql/ResultsPanel";
-import { useAppContext } from "@/context/AppContext";
-import {
-  chatDB,
-  getNL2SQLSessions,
-  getSessionHistory,
-  deleteNL2SQLSession,
-  renameNL2SQLSession,
-} from "@/api/client";
-import type { Message, NL2SQLSession, ExecutionResult, ChartSuggestion, Plan } from "@/types";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import { useApp } from "@/context/AppContext";
+import { AppSidebar } from "@/components/common/Sidebar";
+import { ChatMessage } from "@/components/common/ChatMessage";
+import { ChatInput } from "@/components/common/ChatInput";
+import { ThinkingIndicator } from "@/components/common/ThinkingIndicator";
+import { DBConnectionModal } from "@/components/nl2sql/DBConnectionModal";
+import { ResultsPanel } from "@/components/nl2sql/ResultsPanel";
+import { Message, NL2SQLSession } from "@/types";
+import { getNl2sqlSessions, getSessionHistory, deleteNl2sqlSession, chatDb, createNl2sqlSession } from "@/api/client";
+import { ArrowLeft, Database } from "lucide-react";
 
-const NL2SQL: React.FC = () => {
-  const { dbUrl, dbName, connected, setDb } = useAppContext();
-
-  // Show modal only if not yet connected
+const NL2SQL = () => {
+  const navigate = useNavigate();
+  const { connected, dbUrl, dbName } = useApp();
   const [showModal, setShowModal] = useState(!connected);
-
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<NL2SQLSession[]>([]);
-  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [thinking, setThinking] = useState(false);
-  const [submittedClarifications, setSubmittedClarifications] = useState<Set<string>>(new Set());
-
-  const [currentSql, setCurrentSql] = useState<string | null>(null);
-  const [currentExecution, setCurrentExecution] = useState<ExecutionResult | null>(null);
-  const [currentChart, setCurrentChart] = useState<ChartSuggestion | null>(null);
-  const [currentPlan, setCurrentPlan] = useState<Plan | null>(null);
-
+  const [currentSql, setCurrentSql] = useState<string>();
+  const [currentExecution, setCurrentExecution] = useState<any>();
+  const [currentChart, setCurrentChart] = useState<any>();
+  const [currentPlan, setCurrentPlan] = useState<any>();
   const [dividerPos, setDividerPos] = useState(55);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  const scrollToBottom = () => chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-
-  const fetchSessions = useCallback(async () => {
-    setSessionsLoading(true);
+  const loadSessions = useCallback(async () => {
     try {
-      const data = await getNL2SQLSessions();
-      setSessions(data);
-    } catch { /* ignore */ }
-    setSessionsLoading(false);
+      setSessionsLoading(true);
+      const data = await getNl2sqlSessions();
+      setSessions(data || []);
+    } catch { /* ignore */ } finally { setSessionsLoading(false); }
   }, []);
 
-  useEffect(() => { if (connected) fetchSessions(); }, [connected, fetchSessions]);
-  useEffect(scrollToBottom, [messages, thinking]);
+  useEffect(() => { if (connected) loadSessions(); }, [connected, loadSessions]);
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, thinking]);
+  useEffect(() => { setShowModal(!connected); }, [connected]);
 
-  const handleConnected = (url: string, name: string, _tables: string[]) => {
-    setDb(url, name);
-    setShowModal(false);
+  const selectSession = async (id: string | number) => {
+    try {
+      const hist = await getSessionHistory(id as string);
+      setSessionId(id as string);
+      const msgs: Message[] = [];
+      if (hist.history) {
+        for (const h of hist.history) {
+          if (h.role === "user") msgs.push({ id: crypto.randomUUID(), role: "user", content: h.content });
+          else msgs.push({ id: crypto.randomUUID(), role: "assistant", content: h.content?.summary || h.content || "", metadata: h.content });
+        }
+      }
+      setMessages(msgs);
+      if (hist.last_sql) setCurrentSql(hist.last_sql);
+      if (hist.last_execution) setCurrentExecution(hist.last_execution);
+    } catch { /* ignore */ }
   };
 
-  const handleNewChat = () => {
+  const handleNew = () => {
     setSessionId(null);
     setMessages([]);
-    setCurrentSql(null);
-    setCurrentExecution(null);
-    setCurrentChart(null);
-    setCurrentPlan(null);
-    setSubmittedClarifications(new Set());
+    setCurrentSql(undefined);
+    setCurrentExecution(undefined);
+    setCurrentChart(undefined);
+    setCurrentPlan(undefined);
   };
 
-  const handleSelectSession = async (id: string | number) => {
-    try {
-      const data = await getSessionHistory(id as string);
-      setSessionId(id as string);
-      const restored: Message[] = data.chat_history.map((m: any, i: number) => ({
-        id: `restored-${i}`,
-        role: m.role === "user" ? "user" : "assistant",
-        content: m.content,
-      }));
-      setMessages(restored);
-      setCurrentSql(data.last_sql);
-      setCurrentExecution(null);
-      setCurrentChart(null);
-      setCurrentPlan(null);
-      setSubmittedClarifications(new Set());
-    } catch {
-      toast.error("Failed to load session");
+  const handleDelete = async (id: string | number) => {
+    setSessions(prev => prev.filter(s => s.session_id !== id));
+    if (sessionId === id) handleNew();
+    try { await deleteNl2sqlSession(id as string); } catch { /* ignore */ }
+  };
+
+  const handleSend = async (text: string, clarResponse?: string, origInput?: string) => {
+    let sid = sessionId;
+    if (!sid) {
+      try {
+        const res = await createNl2sqlSession();
+        sid = res.session_id;
+        setSessionId(sid);
+      } catch { return; }
     }
-  };
 
-  const handleDeleteSession = async (id: string | number) => {
-    setSessions((prev) => prev.filter((s) => s.session_id !== id));
-    try { await deleteNL2SQLSession(id as string); } catch { fetchSessions(); }
-    if (sessionId === id) handleNewChat();
-  };
-
-  const handleRenameSession = async (id: string | number, title: string) => {
-    setSessions((prev) => prev.map((s) => (s.session_id === id ? { ...s, title } : s)));
-    try { await renameNL2SQLSession(id as string, title); } catch { fetchSessions(); }
-  };
-
-  const handleSend = async (
-    text: string,
-    clarificationMsgId?: string,
-    clarificationResponse?: string,
-  ) => {
-    const currentSessionId = sessionId ?? crypto.randomUUID();
-    if (!sessionId) setSessionId(currentSessionId);
-
-    if (clarificationResponse) {
-      const replyMsg: Message = { id: crypto.randomUUID(), role: "user", content: clarificationResponse };
-      setMessages((prev) => [...prev, replyMsg]);
-      if (clarificationMsgId) {
-        setSubmittedClarifications((prev) => new Set(prev).add(clarificationMsgId));
-      }
-    } else {
-      const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: text };
-      setMessages((prev) => [...prev, userMsg]);
+    if (!clarResponse) {
+      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: "user", content: text }]);
     }
 
     setThinking(true);
-
     try {
-      const res = await chatDB(dbUrl, text, currentSessionId, clarificationResponse);
+      const res = await chatDb({
+        db_url: dbUrl,
+        user_input: clarResponse ? (origInput || text) : text,
+        session_id: sid!,
+        ...(clarResponse ? { clarification_response: clarResponse } : {}),
+      });
 
-      if (res.success) {
-        const assistantMsg: Message = {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: res.summary || "Query executed successfully.",
-          metadata: {
-            sql: res.generated_sql,
-            summary: res.summary,
-            chart: res.chart_suggestion,
-            execution: res.execution,
-            plan: res.plan,
-            wasRetried: res.was_retried,
-          },
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
-        setCurrentSql(res.generated_sql || null);
-        setCurrentExecution(res.execution || null);
-        setCurrentChart(res.chart_suggestion || null);
-        setCurrentPlan(res.plan || null);
-        fetchSessions();
-      } else if (res.needs_clarification) {
-        const clarifyMsg: Message = {
-          id: crypto.randomUUID(),
-          role: "clarification",
-          content: res.question || "Could you clarify?",
-          metadata: { question: res.question, originalInput: text },
-        };
-        setMessages((prev) => [...prev, clarifyMsg]);
+      if (res.needs_clarification) {
+        setMessages(prev => [...prev, {
+          id: crypto.randomUUID(), role: "clarification", content: res.question,
+          metadata: { question: res.question, originalInput: clarResponse ? origInput : text }
+        }]);
+      } else if (res.error) {
+        setMessages(prev => [...prev, { id: crypto.randomUUID(), role: "error", content: res.error, metadata: { errorCode: res.error_code } }]);
       } else {
-        const errorMsg: Message = {
-          id: crypto.randomUUID(),
-          role: "error",
-          content: res.error || "An error occurred",
-          metadata: { errorCode: res.error_code, sql: res.generated_sql },
+        const msg: Message = {
+          id: crypto.randomUUID(), role: "assistant",
+          content: res.summary || res.answer || "",
+          metadata: {
+            sql: res.sql, summary: res.summary, chart: res.chart_suggestion,
+            execution: res.execution, plan: res.plan, wasRetried: res.was_retried,
+          }
         };
-        setMessages((prev) => [...prev, errorMsg]);
-        if (res.generated_sql) setCurrentSql(res.generated_sql);
+        setMessages(prev => [...prev, msg]);
+        if (res.sql) setCurrentSql(res.sql);
+        if (res.execution) setCurrentExecution(res.execution);
+        if (res.chart_suggestion) setCurrentChart(res.chart_suggestion);
+        if (res.plan) setCurrentPlan(res.plan);
       }
-    } catch (err: any) {
-      toast.error(err.message || "Network error");
-    }
-    setThinking(false);
+      loadSessions();
+    } catch (e: any) {
+      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: "error", content: e.message }]);
+    } finally { setThinking(false); }
   };
 
-  const handleClarificationSubmit = (
-    clarificationMsgId: string,
-    originalInput: string,
-  ) => (response: string) => {
-    handleSend(originalInput, clarificationMsgId, response);
-  };
-
-  const handleMouseDown = () => { dragging.current = true; };
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (!dragging.current) return;
-    const container = document.getElementById("nl2sql-main");
-    if (!container) return;
-    const rect = container.getBoundingClientRect();
-    const pct = ((e.clientY - rect.top) / rect.height) * 100;
-    setDividerPos(Math.max(25, Math.min(75, pct)));
-  }, []);
-  const handleMouseUp = useCallback(() => { dragging.current = false; }, []);
-
+  const onMouseDown = () => { dragging.current = true; };
   useEffect(() => {
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
+    const onMove = (e: MouseEvent) => {
+      if (!dragging.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const pct = ((e.clientY - rect.top) / rect.height) * 100;
+      setDividerPos(Math.max(25, Math.min(75, pct)));
     };
-  }, [handleMouseMove, handleMouseUp]);
-
-  if (showModal) {
-    return (
-      <DBConnectionModal
-        onConnected={handleConnected}
-        // If already connected, show a cancel button to go back without changing anything
-        onClose={connected ? () => setShowModal(false) : undefined}
-        showBack={!connected}
-      />
-    );
-  }
-
-  const sidebarSessions = sessions.map((s) => ({
-    id: s.session_id,
-    title: s.title,
-    updated_at: s.updated_at,
-  }));
+    const onUp = () => { dragging.current = false; };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, []);
 
   return (
     <div className="flex h-screen bg-background">
-      <Sidebar
-        sessions={sidebarSessions}
+      <div className="animated-bg" />
+      <DBConnectionModal open={showModal} onClose={() => setShowModal(false)} />
+
+      <AppSidebar
+        label="Chats"
+        sessions={sessions.map(s => ({ id: s.session_id, title: s.title, updated_at: s.updated_at }))}
         activeId={sessionId}
-        onSelect={handleSelectSession}
-        onDelete={handleDeleteSession}
-        onRename={handleRenameSession}
-        onNewChat={handleNewChat}
+        onSelect={selectSession}
+        onDelete={handleDelete}
+        onNew={handleNew}
         loading={sessionsLoading}
       />
 
-      <div className="flex flex-col flex-1 min-w-0">
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-card/50">
-          <h2 className="text-sm font-medium text-foreground truncate">
-            {sessions.find((s) => s.session_id === sessionId)?.title || "New Chat"}
-          </h2>
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 px-3 py-1 rounded-full bg-muted border border-border text-xs text-foreground hover:bg-muted/80 transition-colors"
-          >
-            <span className="w-2 h-2 rounded-full bg-success" />
-            {dbName}
-          </button>
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top bar */}
+        <div className="h-12 flex items-center justify-between px-4 border-b border-border bg-surface shrink-0">
+          <div className="flex items-center gap-3">
+            <button onClick={() => navigate("/")} className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
+              <ArrowLeft className="w-3 h-3" /> Home
+            </button>
+            <span className="text-sm text-foreground truncate">{sessionId ? sessions.find(s => s.session_id === sessionId)?.title || "Chat" : "New Chat"}</span>
+          </div>
+          {connected && (
+            <button onClick={() => setShowModal(true)} className="flex items-center gap-2 bg-success/20 text-success px-3 py-1 rounded-full text-xs">
+              <span className="w-1.5 h-1.5 rounded-full bg-success" />
+              {dbName}
+            </button>
+          )}
         </div>
 
-        <div id="nl2sql-main" className="flex-1 flex flex-col min-h-0">
-          <div
-            className="overflow-y-auto scrollbar-thin p-4 space-y-4"
-            style={{ height: `${dividerPos}%` }}
-          >
-            {messages.length === 0 && (
-              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                Ask a question about your data to get started
-              </div>
-            )}
-            {messages.map((msg) => (
-              <ChatMessage
-                key={msg.id}
-                message={msg}
-                onClarificationSubmit={
-                  msg.role === "clarification" && !submittedClarifications.has(msg.id)
-                    ? handleClarificationSubmit(msg.id, msg.metadata?.originalInput || "")
-                    : undefined
-                }
-              />
-            ))}
-            {thinking && <ThinkingIndicator />}
-            <div ref={chatEndRef} />
+        {/* Main area with draggable divider */}
+        <div ref={containerRef} className="flex-1 flex flex-col min-h-0">
+          <div style={{ height: `${dividerPos}%` }} className="flex flex-col min-h-0">
+            <div className="flex-1 overflow-y-auto p-4">
+              {messages.map(m => (
+                <ChatMessage key={m.id} message={m} onClarificationSubmit={(resp, orig) => handleSend(resp, resp, orig)} />
+              ))}
+              {thinking && <ThinkingIndicator />}
+              <div ref={chatEndRef} />
+            </div>
+            <ChatInput onSend={handleSend} disabled={thinking || !connected} placeholder="Ask a question about your data..." />
           </div>
-
-          <ChatInput
-            onSend={(t) => handleSend(t)}
-            placeholder="Ask a question about your data..."
-            disabled={thinking}
-          />
-
-          <div
-            onMouseDown={handleMouseDown}
-            className="h-1.5 bg-border hover:bg-primary/40 cursor-row-resize transition-colors shrink-0"
-          />
-
+          <div onMouseDown={onMouseDown} className="h-1.5 bg-border hover:bg-primary/50 cursor-row-resize shrink-0 transition-colors" />
           <div style={{ height: `${100 - dividerPos}%` }} className="min-h-0">
-            <ResultsPanel
-              sql={currentSql}
-              execution={currentExecution}
-              chart={currentChart}
-              plan={currentPlan}
-            />
+            <ResultsPanel sql={currentSql} execution={currentExecution} chart={currentChart} plan={currentPlan} />
           </div>
         </div>
       </div>

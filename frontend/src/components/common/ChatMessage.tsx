@@ -1,21 +1,20 @@
-import React, { useState } from "react";
-import { AlertTriangle, Zap } from "lucide-react";
-import type { Message } from "@/types";
-import CitationsPanel from "@/components/copilot/CitationsPanel";
-import ToolBadge from "@/components/copilot/ToolBadge";
+import { useState } from "react";
+import { Message } from "@/types";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 
 interface ChatMessageProps {
   message: Message;
-  onClarificationSubmit?: (response: string) => void;
+  onClarificationSubmit?: (response: string, originalInput: string) => void;
 }
 
-const ChatMessage: React.FC<ChatMessageProps> = ({ message, onClarificationSubmit }) => {
-  const [clarifyInput, setClarifyInput] = useState("");
+export const ChatMessage = ({ message, onClarificationSubmit }: ChatMessageProps) => {
+  const [clarInput, setClarInput] = useState("");
+  const [submitted, setSubmitted] = useState(false);
 
   if (message.role === "user") {
     return (
-      <div className="flex justify-end animate-fade-in">
-        <div className="max-w-[75%] bg-primary text-primary-foreground rounded-xl rounded-br-sm px-4 py-2.5 text-sm">
+      <div className="flex justify-end mb-3">
+        <div className="max-w-[75%] bg-primary text-primary-foreground px-4 py-2.5 rounded-xl rounded-br-sm text-sm">
           {message.content}
         </div>
       </div>
@@ -24,14 +23,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, onClarificationSubmi
 
   if (message.role === "error") {
     return (
-      <div className="flex justify-start animate-fade-in">
-        <div className="max-w-[80%] bg-card border border-destructive/50 rounded-xl px-4 py-3">
+      <div className="flex justify-start mb-3">
+        <div className="max-w-[80%] border border-destructive/50 bg-destructive/10 rounded-xl px-4 py-3 text-sm">
           {message.metadata?.errorCode && (
-            <span className="inline-block px-2 py-0.5 text-xs font-mono rounded bg-destructive/20 text-destructive mb-2">
+            <span className="inline-block bg-destructive/20 text-destructive text-xs font-medium px-2 py-0.5 rounded mb-1 mr-2">
               {message.metadata.errorCode}
             </span>
           )}
-          <p className="text-sm text-destructive">{message.content}</p>
+          <p className="text-destructive">{message.content}</p>
         </div>
       </div>
     );
@@ -39,65 +38,104 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, onClarificationSubmi
 
   if (message.role === "clarification") {
     return (
-      <div className="flex justify-start animate-fade-in">
-        <div className="max-w-[80%] bg-card border border-warning/50 rounded-xl px-4 py-3">
-          <div className="flex items-center gap-2 mb-2 text-warning text-xs font-medium">
-            <AlertTriangle size={14} /> Clarification needed
-          </div>
-          <p className="text-sm text-foreground mb-3">{message.content}</p>
-          {onClarificationSubmit && (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (clarifyInput.trim()) {
-                  onClarificationSubmit(clarifyInput.trim());
-                  setClarifyInput("");
-                }
-              }}
-              className="flex gap-2"
-            >
+      <div className="flex justify-start mb-3">
+        <div className="max-w-[80%] border border-warning/50 bg-warning/10 rounded-xl px-4 py-3 text-sm">
+          <p className="text-warning mb-2">{message.metadata?.question || message.content}</p>
+          {!submitted ? (
+            <div className="flex gap-2">
               <input
-                value={clarifyInput}
-                onChange={(e) => setClarifyInput(e.target.value)}
-                className="flex-1 bg-muted border border-border rounded-lg px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                value={clarInput}
+                onChange={e => setClarInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter" && clarInput.trim()) {
+                    setSubmitted(true);
+                    onClarificationSubmit?.(clarInput.trim(), message.metadata?.originalInput || "");
+                  }
+                }}
                 placeholder="Type your response..."
+                className="flex-1 bg-background border border-border rounded-lg px-3 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-warning/50"
               />
-              <button type="submit" className="px-3 py-1.5 bg-warning text-warning-foreground text-sm rounded-lg hover:bg-warning/90 transition-colors">
-                Reply
+              <button
+                onClick={() => {
+                  if (clarInput.trim()) {
+                    setSubmitted(true);
+                    onClarificationSubmit?.(clarInput.trim(), message.metadata?.originalInput || "");
+                  }
+                }}
+                className="px-3 py-1.5 bg-warning text-warning-foreground rounded-lg text-sm hover:bg-warning/80 transition-all"
+              >
+                Send
               </button>
-            </form>
+            </div>
+          ) : (
+            <p className="text-foreground italic text-xs">Responded: {clarInput}</p>
           )}
         </div>
       </div>
     );
   }
 
-  // Assistant message
+  // assistant
   return (
-    <div className="flex justify-start animate-fade-in">
-      <div className="max-w-[80%] bg-card border border-border rounded-xl px-4 py-3">
-        <p className="text-sm text-foreground whitespace-pre-wrap">{message.content}</p>
-        <div className="flex items-center gap-2 mt-2 flex-wrap">
-          {message.metadata?.wasRetried && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-warning/20 text-warning">
-              <Zap size={12} /> Retried
-            </span>
-          )}
-          {message.metadata?.tool && (
-            <ToolBadge tool={message.metadata.tool} sqlUsed={message.metadata.sqlUsed} ragUsed={message.metadata.ragUsed} />
-          )}
-          {message.metadata?.answerGrounded === false && message.metadata?.ragUsed && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-warning/20 text-warning">
-              <AlertTriangle size={12} /> Answer may not be from your documents
-            </span>
-          )}
-        </div>
+    <div className="flex justify-start mb-3">
+      <div className="max-w-[80%] bg-surface border border-border rounded-xl px-4 py-3 text-sm space-y-2">
+        {message.metadata?.wasRetried && (
+          <span className="inline-flex items-center gap-1 bg-warning/20 text-warning text-xs font-medium px-2 py-0.5 rounded">
+            <RefreshCw className="w-3 h-3" /> Retried
+          </span>
+        )}
+        <p className="text-foreground whitespace-pre-wrap">{message.content}</p>
+
+        {/* Tool badges for copilot */}
+        {message.metadata?.tool && (
+          <div className="flex gap-2 flex-wrap">
+            {message.metadata.tool === "synthesis" && (
+              <>
+                {message.metadata.sqlUsed && (
+                  <span className="text-xs bg-primary/20 text-primary-light px-2 py-0.5 rounded">🗄 SQL</span>
+                )}
+                {message.metadata.ragUsed && (
+                  <span className="text-xs bg-primary/20 text-primary-light px-2 py-0.5 rounded">📄 RAG</span>
+                )}
+              </>
+            )}
+            {message.metadata.tool === "chat" && (
+              <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded">💬 Chat</span>
+            )}
+          </div>
+        )}
+
+        {message.metadata?.answerGrounded === false && message.metadata?.ragUsed && (
+          <div className="flex items-center gap-1.5 text-warning text-xs mt-1">
+            <AlertTriangle className="w-3 h-3" />
+            Answer may not be fully from your documents
+          </div>
+        )}
+
+        {/* Citations */}
         {message.metadata?.citations && message.metadata.citations.length > 0 && (
-          <CitationsPanel citations={message.metadata.citations} />
+          <details className="mt-2">
+            <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
+              Sources ({message.metadata.citations.length})
+            </summary>
+            <div className="mt-2 space-y-1.5">
+              {message.metadata.citations.map((c, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs">
+                  <span className="text-foreground">{c.source}</span>
+                  <span className="text-muted-foreground">p.{c.page}</span>
+                  <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden max-w-[80px]">
+                    <div
+                      className={`h-full rounded-full ${c.confidence >= 0.8 ? "bg-success" : c.confidence >= 0.5 ? "bg-warning" : "bg-destructive"}`}
+                      style={{ width: `${c.confidence * 100}%` }}
+                    />
+                  </div>
+                  <span className="text-muted-foreground">{(c.confidence * 100).toFixed(0)}%</span>
+                </div>
+              ))}
+            </div>
+          </details>
         )}
       </div>
     </div>
   );
 };
-
-export default ChatMessage;

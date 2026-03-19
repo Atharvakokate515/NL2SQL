@@ -1,40 +1,45 @@
-import React, { useState } from "react";
+import { useState, KeyboardEvent } from "react";
 import { Send } from "lucide-react";
 
 interface ChatInputProps {
-  onSend: (text: string) => void;
-  placeholder?: string;
+  onSend: (message: string) => void;
   disabled?: boolean;
+  placeholder?: string;
 }
 
-const ChatInput: React.FC<ChatInputProps> = ({ onSend, placeholder = "Type a message...", disabled }) => {
-  const [text, setText] = useState("");
+export const ChatInput = ({ onSend, disabled, placeholder = "Ask a question..." }: ChatInputProps) => {
+  const [value, setValue] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!text.trim() || disabled) return;
-    onSend(text.trim());
-    setText("");
+  const handleSend = () => {
+    if (!value.trim() || disabled) return;
+    onSend(value.trim());
+    setValue("");
+  };
+
+  const handleKey = (e: KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-2 p-3 border-t border-border bg-card/50">
+    <div className="flex items-center gap-2 p-3 border-t border-border bg-surface rounded-b-xl">
       <input
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder={placeholder}
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        onKeyDown={handleKey}
         disabled={disabled}
-        className="flex-1 bg-muted border border-border rounded-lg px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all duration-200"
+        placeholder={placeholder}
+        className="flex-1 bg-background border border-border rounded-lg px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/50 focus:border-primary/50 outline-none transition-all duration-200"
       />
       <button
-        type="submit"
-        disabled={disabled || !text.trim()}
-        className="p-2.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 hover:shadow-lg hover:shadow-primary/25"
+        onClick={handleSend}
+        disabled={disabled || !value.trim()}
+        className="p-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/80 disabled:opacity-40 transition-all duration-200"
       >
-        <Send size={18} />
+        <Send className="w-4 h-4" />
       </button>
-    </form>
+    </div>
   );
 };
-
-export default ChatInput;

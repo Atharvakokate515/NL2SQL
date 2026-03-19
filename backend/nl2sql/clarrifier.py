@@ -1,6 +1,7 @@
 # backend/nl2sql/clarrifier.py
 
 from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers.pydantic import OutputParserException
 
 from llm.client import llm
 from llm.clarifier_prompt import CLARIFIER_PROMPT
@@ -55,14 +56,20 @@ def clarify_query(
 
     chain = prompt | llm | clarifier_parser
 
-    result: ClarifierOutput = chain.invoke({
-        "user_input": user_input,
-        "schema_summary": schema_summary,
-        "chat_history": _format_chat_history(chat_history or []),
-        "last_sql": last_sql or "None",
-        "FORMAT_INSTRUCTIONS": clarifier_parser.get_format_instructions()
-    })
-
+    try:
+        result: ClarifierOutput = chain.invoke({
+            "user_input": user_input,
+            "schema_summary": schema_summary,
+            "chat_history": _format_chat_history(chat_history or []),
+            "last_sql": last_sql or "None",
+            "FORMAT_INSTRUCTIONS": clarifier_parser.get_format_instructions()
+        })
+    except OutputParserException as e:
+        # Catch parsing errors and inspect raw output
+        print("Failed to parse LLM output!")
+        print("Raw output:", e.args)
+    
+    
     return result
 
 

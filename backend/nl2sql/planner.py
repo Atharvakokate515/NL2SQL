@@ -1,6 +1,7 @@
 # backend/nl2sql/planner.py
 
 from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers.pydantic import OutputParserException
 
 from llm.client import llm
 from llm.nl2sql_planner_prompt import NL2SQL_PLANNER_PROMPT
@@ -57,12 +58,17 @@ def plan_query(
 
     chain = prompt | llm | nl2sql_planner_parser
 
-    plan = chain.invoke({
-        "user_input": user_input,
-        "schema": schema,
-        "chat_history": _format_chat_history(recent_history),
-        "FORMAT_INSTRUCTIONS": nl2sql_planner_parser.get_format_instructions()
-    })
+    try:
+        plan = chain.invoke({
+            "user_input": user_input,
+            "schema": schema,
+            "chat_history": _format_chat_history(recent_history),
+            "FORMAT_INSTRUCTIONS": nl2sql_planner_parser.get_format_instructions()
+        })
+    except OutputParserException as e:
+        # Catch parsing errors and inspect raw output
+        print("Failed to parse LLM output!")
+        print("Raw output:", e.args)
 
     return plan 
 

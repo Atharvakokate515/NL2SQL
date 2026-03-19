@@ -1,101 +1,74 @@
-// frontend/src/api/client.ts
-const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const BASE = "/api";
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    ...options,
+async function request<T>(url: string, opts?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${url}`, {
+    headers: { "Content-Type": "application/json", ...(opts?.headers as Record<string, string> || {}) },
+    ...opts,
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(body || res.statusText);
+  }
   return res.json();
 }
 
-// ─── NL2SQL ──────────────────────────────────────────────────────────────
-
+// NL2SQL
 export const testConnection = (db_url: string) =>
-  request<any>("/api/test-connection", { method: "POST", body: JSON.stringify({ db_url }) });
+  request<{ success: boolean; db_name: string; tables: string[] }>("/test-connection", {
+    method: "POST", body: JSON.stringify({ db_url }),
+  });
 
 export const getSchemaPreview = (db_url: string) =>
-  request<any>(`/api/schema-preview?db_url=${encodeURIComponent(db_url)}`);
+  request<any>(`/schema-preview?db_url=${encodeURIComponent(db_url)}`);
 
-export const chatDB = (
-  db_url: string,
-  user_input: string,
-  session_id?: string,                        // optional — server creates if absent
-  clarification_response?: string,
-) =>
-  request<any>("/api/chat-db", {
-    method: "POST",
-    body: JSON.stringify({
-      db_url,
-      user_input,
-      ...(session_id !== undefined ? { session_id } : {}),   // omit key if no session yet
-      ...(clarification_response !== undefined ? { clarification_response } : {}),
-    }),
-  });
+export const chatDb = (data: { db_url: string; user_input: string; session_id: string; clarification_response?: string }) =>
+  request<any>("/chat-db", { method: "POST", body: JSON.stringify(data) });
 
-export const getNL2SQLSessions = () => request<any[]>("/api/nl2sql-sessions");
+export const getNl2sqlSessions = () =>
+  request<any[]>("/nl2sql-sessions");
 
-export const getSessionHistory = (session_id: string) =>
-  request<any>(`/api/session-history/${session_id}`);
+export const createNl2sqlSession = () =>
+  request<{ session_id: string }>("/nl2sql-sessions", { method: "POST", body: JSON.stringify({}) });
 
-export const renameNL2SQLSession = (session_id: string, title: string) =>
-  request<any>(`/api/nl2sql-sessions/${session_id}`, {
-    method: "PATCH",
-    body: JSON.stringify({ title }),
-  });
+export const getSessionHistory = (id: string) =>
+  request<any>(`/session-history/${id}`);
 
-export const deleteNL2SQLSession = (session_id: string) =>
-  request<any>(`/api/nl2sql-sessions/${session_id}`, { method: "DELETE" });
+export const deleteNl2sqlSession = (id: string) =>
+  request<any>(`/nl2sql-sessions/${id}`, { method: "DELETE" });
 
-export const createNL2SQLSession = () =>
-  request<any>("/api/nl2sql-sessions", { method: "POST" });
+export const patchNl2sqlSession = (id: string, title: string) =>
+  request<any>(`/nl2sql-sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title }) });
 
-// ─── Copilot ─────────────────────────────────────────────────────────────
-
+// Copilot
 export const createChat = (title?: string) =>
-  request<any>("/api/create-chat", {
-    method: "POST",
-    body: JSON.stringify({ title: title ?? "New Copilot Chat" }),
-  });
+  request<{ chat_id: number }>("/create-chat", { method: "POST", body: JSON.stringify({ title: title || "New Copilot Chat" }) });
 
-export const agentChat = (db_url: string, user_input: string, chat_id?: number) =>
-  request<any>("/api/agent-chat", {
-    method: "POST",
-    body: JSON.stringify({
-      db_url,
-      user_input,
-      ...(chat_id !== undefined ? { chat_id } : {}),         // omit key if no chat yet
-    }),
-  });
+export const agentChat = (data: { db_url: string; user_input: string; chat_id: number }) =>
+  request<any>("/agent-chat", { method: "POST", body: JSON.stringify(data) });
 
-export const getCopilotSessions = () => request<any[]>("/api/copilot-sessions");
+export const getCopilotSessions = () =>
+  request<any[]>("/copilot-sessions");
 
-export const getCopilotHistory = (chat_id: number) =>
-  request<any>(`/api/copilot-history/${chat_id}`);
+export const getCopilotHistory = (id: number) =>
+  request<any>(`/copilot-history/${id}`);
 
-export const renameCopilotSession = (chat_id: number, title: string) =>
-  request<any>(`/api/copilot-sessions/${chat_id}`, {
-    method: "PATCH",
-    body: JSON.stringify({ title }),
-  });
+export const deleteCopilotSession = (id: number) =>
+  request<any>(`/copilot-sessions/${id}`, { method: "DELETE" });
 
-export const deleteCopilotSession = (chat_id: number) =>
-  request<any>(`/api/copilot-sessions/${chat_id}`, { method: "DELETE" });
-
-// ─── Documents ───────────────────────────────────────────────────────────
-
+// Docs
 export const uploadDoc = (file: File) => {
-  const form = new FormData();
-  form.append("file", file);
-  return fetch(`${BASE}/api/upload-doc`, { method: "POST", body: form }).then((r) => r.json());
+  const fd = new FormData();
+  fd.append("file", file);
+  return fetch(`${BASE}/upload-doc`, { method: "POST", body: fd }).then(r => {
+    if (!r.ok) throw new Error("Upload failed");
+    return r.json();
+  });
 };
 
-export const getDocs = () => request<any>("/api/docs");
+export const getDocs = () => request<any[]>("/docs");
 
 export const deleteDoc = (source: string) =>
-  request<any>(`/api/docs/${encodeURIComponent(source)}`, { method: "DELETE" });
+  request<any>(`/docs/${encodeURIComponent(source)}`, { method: "DELETE" });
 
-// ─── Metrics ─────────────────────────────────────────────────────────────
-
-export const getMetrics = () => request<any>("/api/metrics");
+// Metrics
+export const getMetrics = () => request<any>("/metrics");

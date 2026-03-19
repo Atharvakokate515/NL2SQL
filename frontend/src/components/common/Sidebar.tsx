@@ -1,175 +1,103 @@
-// frontend/src/components/common/Sidebar.tsx
-import React, { useState, useRef, useEffect } from "react";
-import { Plus, Trash2, MessageSquare, Pencil, Check, X } from "lucide-react";
-import { NavLink } from "react-router-dom";
+import { useState } from "react";
+import { ChevronLeft, ChevronRight, Plus, Trash2, MessageSquare } from "lucide-react";
 
-interface Session {
+interface SidebarSession {
   id: string | number;
   title: string;
-  updated_at?: string;
+  updated_at: string;
 }
 
-interface SidebarProps {
-  sessions: Session[];
+interface AppSidebarProps {
+  label: string;
+  sessions: SidebarSession[];
   activeId: string | number | null;
   onSelect: (id: string | number) => void;
   onDelete: (id: string | number) => void;
-  onNewChat: () => void;
-  onRename?: (id: string | number, newTitle: string) => void;
+  onNew: () => void;
   loading?: boolean;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({
-  sessions,
-  activeId,
-  onSelect,
-  onDelete,
-  onNewChat,
-  onRename,
-  loading = false,
-}) => {
-  const [renamingId, setRenamingId] = useState<string | number | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
+function timeAgo(dateStr: string) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
 
-  useEffect(() => {
-    if (renamingId !== null) inputRef.current?.focus();
-  }, [renamingId]);
-
-  const startRename = (e: React.MouseEvent, session: Session) => {
-    e.stopPropagation();
-    setRenamingId(session.id);
-    setRenameValue(session.title);
-  };
-
-  const commitRename = (id: string | number) => {
-    const trimmed = renameValue.trim();
-    if (trimmed && onRename) onRename(id, trimmed);
-    setRenamingId(null);
-  };
-
-  const cancelRename = () => setRenamingId(null);
-
-  const handleKeyDown = (e: React.KeyboardEvent, id: string | number) => {
-    if (e.key === "Enter") commitRename(id);
-    if (e.key === "Escape") cancelRename();
-  };
+export const AppSidebar = ({ label, sessions, activeId, onSelect, onDelete, onNew, loading }: AppSidebarProps) => {
+  const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <div className="w-60 shrink-0 flex flex-col h-screen bg-card border-r border-border">
-      {/* Header nav */}
-      <div className="flex items-center gap-2 px-3 py-3 border-b border-border">
-        <NavLink
-          to="/nl2sql"
-          className={({ isActive }) =>
-            `flex-1 text-center text-xs py-1.5 rounded-md transition-colors ${
-              isActive
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted"
-            }`
-          }
-        >
-          NL2SQL
-        </NavLink>
-        <NavLink
-          to="/copilot"
-          className={({ isActive }) =>
-            `flex-1 text-center text-xs py-1.5 rounded-md transition-colors ${
-              isActive
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted"
-            }`
-          }
-        >
-          Copilot
-        </NavLink>
-      </div>
-
-      {/* New chat */}
-      <div className="px-3 py-2">
+    <div
+      className={`h-full bg-sidebar border-r border-sidebar-border flex flex-col transition-all duration-200 ${
+        collapsed ? "w-14" : "w-64"
+      }`}
+    >
+      <div className="flex items-center justify-between p-3 border-b border-sidebar-border">
+        {!collapsed && <span className="font-display text-sm text-sidebar-foreground">{label}</span>}
         <button
-          onClick={onNewChat}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-medium transition-colors"
+          onClick={() => setCollapsed(!collapsed)}
+          className="p-1 rounded hover:bg-sidebar-accent transition-colors ml-auto"
         >
-          <Plus size={14} />
-          New Chat
+          {collapsed ? <ChevronRight className="w-4 h-4 text-sidebar-foreground" /> : <ChevronLeft className="w-4 h-4 text-sidebar-foreground" />}
         </button>
       </div>
 
-      {/* Session list */}
-      <div className="flex-1 overflow-y-auto scrollbar-thin px-2 pb-2 space-y-0.5">
-        {loading && (
-          <p className="text-xs text-muted-foreground text-center py-4">Loading…</p>
-        )}
-        {!loading && sessions.length === 0 && (
-          <p className="text-xs text-muted-foreground text-center py-4">No chats yet</p>
-        )}
-        {sessions.map((session) => (
-          <div
-            key={session.id}
-            onClick={() => renamingId !== session.id && onSelect(session.id)}
-            className={`group flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer transition-colors ${
-              activeId === session.id
-                ? "bg-accent text-accent-foreground"
-                : "hover:bg-muted text-foreground"
-            }`}
-          >
-            <MessageSquare size={13} className="shrink-0 text-muted-foreground" />
+      <button
+        onClick={onNew}
+        className={`mx-2 mt-2 flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-sidebar-foreground hover:bg-sidebar-accent transition-all ${
+          collapsed ? "justify-center" : ""
+        }`}
+        title="New Chat"
+      >
+        <Plus className="w-4 h-4 shrink-0" />
+        {!collapsed && <span>New Chat</span>}
+      </button>
 
-            {renamingId === session.id ? (
-              <div
-                className="flex items-center gap-1 flex-1 min-w-0"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <input
-                  ref={inputRef}
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onKeyDown={(e) => handleKeyDown(e, session.id)}
-                  className="flex-1 min-w-0 bg-background border border-border rounded px-1.5 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
-                />
-                <button
-                  onClick={() => commitRename(session.id)}
-                  className="text-success hover:opacity-70 shrink-0"
-                >
-                  <Check size={12} />
-                </button>
-                <button
-                  onClick={cancelRename}
-                  className="text-muted-foreground hover:text-foreground shrink-0"
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            ) : (
-              <>
-                <span className="flex-1 text-xs truncate">{session.title}</span>
-                <div className="hidden group-hover:flex items-center gap-1 shrink-0">
-                  {onRename && (
-                    <button
-                      onClick={(e) => startRename(e, session)}
-                      className="text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      <Pencil size={12} />
-                    </button>
-                  )}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDelete(session.id);
-                    }}
-                    className="text-muted-foreground hover:text-destructive transition-colors"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              </>
-            )}
+      <div className="flex-1 overflow-y-auto mt-2 px-1">
+        {loading ? (
+          <div className="space-y-2 px-2">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="h-10 bg-sidebar-accent rounded-lg animate-pulse" />
+            ))}
           </div>
-        ))}
+        ) : sessions.length === 0 ? (
+          <p className="text-xs text-muted-foreground px-3 py-4">
+            No chats yet. Ask your first question to get started.
+          </p>
+        ) : (
+          sessions.map(s => (
+            <div
+              key={s.id}
+              onClick={() => onSelect(s.id)}
+              className={`group flex items-center gap-2 px-2 py-2 mx-1 rounded-lg cursor-pointer transition-all duration-200 ${
+                activeId === s.id ? "bg-sidebar-accent border-l-2 border-sidebar-primary" : "hover:bg-sidebar-accent/50 border-l-2 border-transparent"
+              }`}
+              title={collapsed ? s.title : undefined}
+            >
+              {collapsed ? (
+                <MessageSquare className="w-4 h-4 text-sidebar-foreground shrink-0" />
+              ) : (
+                <>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-sidebar-foreground truncate">{s.title}</p>
+                    <p className="text-xs text-muted-foreground">{timeAgo(s.updated_at)}</p>
+                  </div>
+                  <button
+                    onClick={e => { e.stopPropagation(); onDelete(s.id); }}
+                    className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-destructive/20 transition-all"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                  </button>
+                </>
+              )}
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
 };
-
-export default Sidebar;

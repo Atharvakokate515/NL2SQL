@@ -1,6 +1,7 @@
 # backend/nl2sql/generator.py
 
 from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers.pydantic import OutputParserException
 
 from llm.client import llm
 from llm.schema_parser import schema_parser
@@ -103,7 +104,15 @@ def generate_sql(
         invoke_args["failed_sql"] = failed_sql
         invoke_args["error_feedback"] = error_feedback
 
-    raw_output = chain.invoke(invoke_args)
+    
+    try:
+        raw_output = chain.invoke(invoke_args)
+    except OutputParserException as e:
+        # Catch parsing errors and inspect raw output
+        print("Failed to parse LLM output!")
+        print("Raw output:", e.args)
+
+
     return clean_sql(raw_output.sql)
 
 

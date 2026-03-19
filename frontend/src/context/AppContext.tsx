@@ -1,22 +1,18 @@
-// frontend/src/context/AppContext.tsx
-import React, { createContext, useContext, useState } from "react";
+import React, { createContext, useContext, useState, ReactNode } from "react";
 
 interface AppState {
-  // NL2SQL
   dbUrl: string;
   dbName: string;
   connected: boolean;
   setDb: (url: string, name: string) => void;
   clearDb: () => void;
-
-  // Copilot
   docsReady: boolean;
   setDocsReady: (ready: boolean) => void;
 }
 
-const AppContext = createContext<AppState | null>(null);
+const AppContext = createContext<AppState | undefined>(undefined);
 
-export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [dbUrl, setDbUrl] = useState("");
   const [dbName, setDbName] = useState("");
   const [connected, setConnected] = useState(false);
@@ -27,7 +23,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setDbName(name);
     setConnected(true);
   };
-
   const clearDb = () => {
     setDbUrl("");
     setDbName("");
@@ -41,8 +36,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 };
 
-export const useAppContext = () => {
+export const useApp = () => {
   const ctx = useContext(AppContext);
-  if (!ctx) throw new Error("useAppContext must be used within AppProvider");
+  if (!ctx) throw new Error("useApp must be used within AppProvider");
   return ctx;
 };
