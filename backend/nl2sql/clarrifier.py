@@ -65,11 +65,11 @@ def clarify_query(
             "FORMAT_INSTRUCTIONS": clarifier_parser.get_format_instructions()
         })
     except OutputParserException as e:
-        # Catch parsing errors and inspect raw output
-        print("Failed to parse LLM output!")
-        print("Raw output:", e.args)
-    
-    
+        # If the LLM output can't be parsed, default to clear
+        # so the user isn't stuck in an infinite clarification loop
+        print(f"[clarifier] Parse failed, defaulting to is_clear=True. Error: {str(e.args)[:150]}")
+        result = ClarifierOutput(is_clear=True, question="")
+
     return result
 
 

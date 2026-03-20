@@ -91,10 +91,15 @@ def _suggest_chart(execution: dict) -> dict | None:
     if row_count == 0 or not rows:
         return None
 
-    numeric_cols = [
-        c for c in col_names
-        if any(isinstance(row.get(c), (int, float)) for row in rows[:5])
-    ]
+    # Rows from executor are lists (not dicts) — use index-based access
+    def _is_numeric_col(col_index: int) -> bool:
+        for row in rows[:5]:
+            val = row[col_index] if isinstance(row, (list, tuple)) else row.get(col_names[col_index])
+            if val is not None and isinstance(val, (int, float)):
+                return True
+        return False
+
+    numeric_cols = [c for i, c in enumerate(col_names) if _is_numeric_col(i)]
     text_cols = [c for c in col_names if c not in numeric_cols]
 
     if row_count == 1 and len(col_names) == 1:
