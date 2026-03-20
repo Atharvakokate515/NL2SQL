@@ -28,37 +28,30 @@ def rag_tool(user_input: str, chat_history: list[dict] = None):
     """
     RAG Tool — handles both fresh queries and follow-up questions.
 
-    Follow-up handling strategy:
-    Instead of a brittle keyword detector, we always pass the last 3 messages
-    of chat history into the RAGService prompt as context. The LLM inside
-    RAGService naturally resolves pronouns and references ("it", "that policy",
-    "the above") using the conversation context without any special detection logic.
-
-    This means:
-    - Fresh query with no history → works as before, history section is empty
-    - Follow-up like "explain that further" → LLM sees previous exchange and resolves it
-    - No false positives from keyword matching on words like "when", "who", "how"
-
-    Args:
-        user_input   : The RAG sub-task from the Copilot planner
-        chat_history : Full conversation history from the session
+    Key improvements over original:
+    1. k=5 instead of k=3 — retrieves more chunks for better summarization coverage.
+       3 chunks was often too few to meaningfully summarize a full document.
+    2. Passes chat_history to RAGService which now does query rewriting before
+       hitting ChromaDB. This means follow-ups like "in detailed points" or
+       "tell me more" are expanded into concrete search queries using context,
+       rather than being sent raw to the vector store where they return noise.
     """
 
     chat_history = chat_history or []
 
-    # Pass only the last 3 exchanges (6 messages) to keep the prompt focused
+    # Pass the last 6 messages (3 exchanges) — enough context for rewriting
     recent_history = chat_history[-6:] if len(chat_history) > 6 else chat_history
 
     result = rag_service.answer(
         question=user_input,
-        k=3,
-        chat_history=recent_history         # passed through to RAGService prompt
+        k=5,                        # increased from 3
+        chat_history=recent_history
     )
 
     return {
-        "tool": "rag",
-        "success": True,
-        "answer": result["answer"],
-        "citations": result["citations"],
+        "tool":         "rag",
+        "success":      True,
+        "answer":       result["answer"],
+        "citations":    result["citations"],
         "context_used": user_input
     }

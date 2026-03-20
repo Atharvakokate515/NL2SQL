@@ -1,8 +1,8 @@
 # backend/api/chat.py
 
+import json
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-import uuid
 
 from nl2sql.clarrifier import clarify_query
 from nl2sql.planner import plan_query
@@ -17,6 +17,7 @@ from graph.graph import build_graph
 
 from llm.client import generate_text
 from llm.result_summary_prompt import RESULT_SUMMARY_PROMPT
+from llm.token_error import is_token_error, token_error_response   # ← new
 
 from memory.chat_store import (
     create_chat, save_message, load_chat_history,
@@ -26,12 +27,12 @@ from memory.chat_store import (
 from memory.session_store import (
     get_last_sql, update_last_sql, get_chat_history, append_message,
     get_session_history_by_id, list_nl2sql_sessions, update_session_title,
-    delete_nl2sql_session, create_session,          # ← new import
+    delete_nl2sql_session, create_session,
 )
 
 
 router = APIRouter()
-graph = build_graph()
+graph  = build_graph()
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -39,16 +40,16 @@ graph = build_graph()
 # ─────────────────────────────────────────────────────────────────
 
 class NL2SQLRequest(BaseModel):
-    db_url: str
-    user_input: str
-    session_id: str | None = None           # FIX 2: optional — server creates if absent
-    clarification_response: str | None = None
+    db_url:                  str
+    user_input:              str
+    session_id:              str | None = None
+    clarification_response:  str | None = None
 
 
 class AgentChat(BaseModel):
-    db_url: str
+    db_url:     str
     user_input: str
-    chat_id: int | None = None              # FIX 3: optional — server creates if absent
+    chat_id:    int | None = None
 
 
 class CreateChatRequest(BaseModel):
@@ -77,21 +78,22 @@ def _generate_result_summary(user_input: str, execution: dict) -> str:
         )
         response = generate_text(prompt)
         return response.content.strip() if hasattr(response, "content") else str(response).strip()
-    except Exception:
+    except Exception as e:
+        if is_token_error(e):
+            raise   # re-raise so the endpoint catches it
         return ""
 
 
 def _suggest_chart(execution: dict) -> dict | None:
-    result = execution.get("result", {})
+    result    = execution.get("result", {})
     if result.get("type") != "select":
         return None
-    rows = result.get("rows", [])
+    rows      = result.get("rows", [])
     col_names = result.get("col_names", [])
     row_count = result.get("row_count", 0)
     if row_count == 0 or not rows:
         return None
 
-    # Rows from executor are lists (not dicts) — use index-based access
     def _is_numeric_col(col_index: int) -> bool:
         for row in rows[:5]:
             val = row[col_index] if isinstance(row, (list, tuple)) else row.get(col_names[col_index])
@@ -100,7 +102,7 @@ def _suggest_chart(execution: dict) -> dict | None:
         return False
 
     numeric_cols = [c for i, c in enumerate(col_names) if _is_numeric_col(i)]
-    text_cols = [c for c in col_names if c not in numeric_cols]
+    text_cols    = [c for c in col_names if c not in numeric_cols]
 
     if row_count == 1 and len(col_names) == 1:
         return {"type": "table", "x_axis": None, "y_axis": None}
@@ -142,160 +144,176 @@ def schema_preview(db_url: str):
 @router.post("/chat-db")
 def chat_with_db(data: NL2SQLRequest):
 
-    # FIX 2: auto-create session if client didn't supply one
-    session_id = data.session_id or create_session()
+    session_id     = data.session_id or create_session()
     is_new_session = data.session_id is None
 
-    query = data.clarification_response or data.user_input
-    last_sql = get_last_sql(session_id)
+    query        = data.clarification_response or data.user_input
+    last_sql     = get_last_sql(session_id)
     chat_history = get_chat_history(session_id)
 
-    # ── Clarifier ─────────────────────────────────────────────────
-    if not data.clarification_response:
-        clarification = clarify_query(
-            user_input=query, db_url=data.db_url,
-            chat_history=chat_history, last_sql=last_sql,
-        )
-        if not clarification.is_clear:
-            append_message(session_id=session_id, role="user", content=data.user_input)
-            append_message(session_id=session_id, role="assistant", content=clarification.question)
-            return {
-                "success": False,
-                "session_id": session_id,           # always return session_id
-                "is_new_session": is_new_session,
-                "stage": "clarification",
-                "error_code": "CLARIFICATION_NEEDED",
-                "needs_clarification": True,
-                "question": clarification.question,
-            }
+    try:
 
-    if not chat_history:
-        update_session_title(session_id, query[:60] + ("..." if len(query) > 60 else ""))
+        # ── Clarifier ─────────────────────────────────────────────
+        if not data.clarification_response:
+            clarification = clarify_query(
+                user_input=query, db_url=data.db_url,
+                chat_history=chat_history, last_sql=last_sql,
+            )
+            if not clarification.is_clear:
+                append_message(session_id=session_id, role="user",      content=data.user_input)
+                append_message(session_id=session_id, role="assistant", content=clarification.question)
+                return {
+                    "success":           False,
+                    "session_id":        session_id,
+                    "is_new_session":    is_new_session,
+                    "stage":             "clarification",
+                    "error_code":        "CLARIFICATION_NEEDED",
+                    "needs_clarification": True,
+                    "question":          clarification.question,
+                }
 
-    # ── Planner ───────────────────────────────────────────────────
-    plan = plan_query(user_input=query, db_url=data.db_url, chat_history=chat_history)
+        if not chat_history:
+            update_session_title(session_id, query[:60] + ("..." if len(query) > 60 else ""))
 
-    # ── Generator ─────────────────────────────────────────────────
-    sql = generate_sql(
-        user_input=query, db_url=data.db_url,
-        plan=plan, last_sql=last_sql, chat_history=chat_history,
-    )
+        # ── Planner ───────────────────────────────────────────────
+        plan = plan_query(user_input=query, db_url=data.db_url, chat_history=chat_history)
 
-    # ── Validator (FIX 1: retry on validation failure instead of hard-failing) ──
-    allowed_tables = get_table_list(data.db_url)
-    validation = is_safe_sql(sql, allowed_tables)
-    was_retried = False
-
-    if not validation["safe"]:
-        # The LLM produced invalid SQL — give it one chance to self-correct
-        # using the validation failure reason as feedback, exactly like exec retry.
-        original_sql = sql
+        # ── Generator ─────────────────────────────────────────────
         sql = generate_sql(
             user_input=query, db_url=data.db_url,
             plan=plan, last_sql=last_sql, chat_history=chat_history,
-            error_feedback=f"Validation failed: {validation['reason']}",
-            failed_sql=original_sql,
         )
-        was_retried = True
 
-        # Re-validate the corrected SQL — if it still fails, give up cleanly
-        validation2 = is_safe_sql(sql, allowed_tables)
-        if not validation2["safe"]:
-            return {
-                "success": False,
-                "session_id": session_id,
-                "is_new_session": is_new_session,
-                "stage": "validation",
-                "error_code": "VALIDATION_FAILED",
-                "error": validation2["reason"],
-                "generated_sql": sql,
-                "original_sql": original_sql,
-                "was_retried": True,
-            }
+        # ── Validator ─────────────────────────────────────────────
+        allowed_tables = get_table_list(data.db_url)
+        validation     = is_safe_sql(sql, allowed_tables)
+        was_retried    = False
 
-    # ── Executor (with one retry on execution failure) ─────────────
-    execution_result = execute_sql(data.db_url, sql)
+        if not validation["safe"]:
+            original_sql = sql
+            sql = generate_sql(
+                user_input=query, db_url=data.db_url,
+                plan=plan, last_sql=last_sql, chat_history=chat_history,
+                error_feedback=f"Validation failed: {validation['reason']}",
+                failed_sql=original_sql,
+            )
+            was_retried = True
 
-    if not execution_result["success"]:
-        error_msg = execution_result.get("error", "Unknown execution error")
-        original_sql = sql
+            validation2 = is_safe_sql(sql, allowed_tables)
+            if not validation2["safe"]:
+                return {
+                    "success":       False,
+                    "session_id":    session_id,
+                    "is_new_session": is_new_session,
+                    "stage":         "validation",
+                    "error_code":    "VALIDATION_FAILED",
+                    "error":         validation2["reason"],
+                    "generated_sql": sql,
+                    "original_sql":  original_sql,
+                    "was_retried":   True,
+                }
 
-        sql = generate_sql(
-            user_input=query, db_url=data.db_url,
-            plan=plan, last_sql=last_sql, chat_history=chat_history,
-            error_feedback=error_msg, failed_sql=original_sql,
-        )
-        was_retried = True
-
-        # Re-validate before re-executing the corrected SQL
-        validation_retry = is_safe_sql(sql, allowed_tables)
-        if not validation_retry["safe"]:
-            return {
-                "success": False,
-                "session_id": session_id,
-                "is_new_session": is_new_session,
-                "stage": "execution",
-                "error_code": "RETRY_VALIDATION_FAILED",
-                "error": validation_retry["reason"],
-                "generated_sql": sql,
-                "original_sql": original_sql,
-                "was_retried": True,
-            }
-
+        # ── Executor ──────────────────────────────────────────────
         execution_result = execute_sql(data.db_url, sql)
 
         if not execution_result["success"]:
+            error_msg    = execution_result.get("error", "Unknown execution error")
+            original_sql = sql
+
+            sql = generate_sql(
+                user_input=query, db_url=data.db_url,
+                plan=plan, last_sql=last_sql, chat_history=chat_history,
+                error_feedback=error_msg, failed_sql=original_sql,
+            )
+            was_retried = True
+
+            validation_retry = is_safe_sql(sql, allowed_tables)
+            if not validation_retry["safe"]:
+                return {
+                    "success":       False,
+                    "session_id":    session_id,
+                    "is_new_session": is_new_session,
+                    "stage":         "execution",
+                    "error_code":    "RETRY_VALIDATION_FAILED",
+                    "error":         validation_retry["reason"],
+                    "generated_sql": sql,
+                    "original_sql":  original_sql,
+                    "was_retried":   True,
+                }
+
+            execution_result = execute_sql(data.db_url, sql)
+
+            if not execution_result["success"]:
+                return {
+                    "success":       False,
+                    "session_id":    session_id,
+                    "is_new_session": is_new_session,
+                    "stage":         "execution",
+                    "error_code":    "RETRY_FAILED",
+                    "error":         execution_result.get("error"),
+                    "generated_sql": sql,
+                    "original_sql":  original_sql,
+                    "was_retried":   True,
+                }
+
+        # ── Summary + chart ───────────────────────────────────────
+        summary          = ""
+        chart_suggestion = None
+        if execution_result.get("query_type") == "SELECT":
+            summary          = _generate_result_summary(query, execution_result)
+            chart_suggestion = _suggest_chart(execution_result)
+
+        # ── Persist ───────────────────────────────────────────────
+        append_message(session_id=session_id, role="user", content=query)
+        assistant_payload = json.dumps({
+            "summary":          summary,
+            "sql":              sql,
+            "chart_suggestion": chart_suggestion,
+            "plan": {
+                "intent":  plan.intent_summary,
+                "tables":  plan.candidate_tables,
+                "columns": plan.candidate_columns,
+            },
+            "was_retried": was_retried,
+        }, default=str)
+        append_message(session_id=session_id, role="assistant", content=assistant_payload)
+        update_last_sql(session_id=session_id, sql=sql)
+
+        return {
+            "success":          True,
+            "session_id":       session_id,
+            "is_new_session":   is_new_session,
+            "stage":            "complete",
+            "generated_sql":    sql,
+            "summary":          summary,
+            "chart_suggestion": chart_suggestion,
+            "was_retried":      was_retried,
+            "plan": {
+                "intent":  plan.intent_summary,
+                "tables":  plan.candidate_tables,
+                "columns": plan.candidate_columns,
+            },
+            "execution": execution_result,
+        }
+
+    # ── Token / quota error — caught at the outermost level ───────
+    # Any LLM call in the pipeline (clarifier, planner, generator,
+    # summary) can raise a token/quota error. We catch it here once
+    # rather than wrapping every individual call.
+    except Exception as e:
+        if is_token_error(e):
             return {
-                "success": False,
-                "session_id": session_id,
+                **token_error_response(str(e)[:120]),
+                "session_id":     session_id,
                 "is_new_session": is_new_session,
-                "stage": "execution",
-                "error_code": "RETRY_FAILED",
-                "error": execution_result.get("error"),
-                "generated_sql": sql,
-                "original_sql": original_sql,
-                "was_retried": True,
             }
-
-    # ── Summary + chart (SELECT only) ────────────────────────────
-    summary = ""
-    chart_suggestion = None
-    if execution_result.get("query_type") == "SELECT":
-        summary = _generate_result_summary(query, execution_result)
-        chart_suggestion = _suggest_chart(execution_result)
-
-    # ── Persist ───────────────────────────────────────────────────
-    append_message(session_id=session_id, role="user", content=query)
-    append_message(session_id=session_id, role="assistant", content=sql)
-    update_last_sql(session_id=session_id, sql=sql)
-
-    return {
-        "success": True,
-        "session_id": session_id,               # always return — client must persist this
-        "is_new_session": is_new_session,
-        "stage": "complete",
-        "generated_sql": sql,
-        "summary": summary,
-        "chart_suggestion": chart_suggestion,
-        "was_retried": was_retried,
-        "plan": {
-            "intent": plan.intent_summary,
-            "tables": plan.candidate_tables,
-            "columns": plan.candidate_columns,
-        },
-        "execution": execution_result,
-    }
+        raise   # non-token errors bubble up as HTTP 500 as before
 
 
 # ── NL2SQL session management ─────────────────────────────────────
 
 @router.post("/nl2sql-sessions")
 def create_nl2sql_session():
-    """
-    Create a new NL2SQL session server-side and return its UUID.
-    Frontend should call this before the first /chat-db message,
-    then pass the returned session_id on all subsequent messages.
-    """
     session_id = create_session()
     return {"success": True, "session_id": session_id}
 
@@ -336,32 +354,42 @@ def create_new_chat(data: CreateChatRequest):
 
 @router.post("/agent-chat")
 def agent_chat(data: AgentChat):
-    # FIX 3: auto-create chat if client didn't supply one
     is_new_chat = data.chat_id is None
-    chat_id = data.chat_id if data.chat_id is not None else create_chat()
+    chat_id     = data.chat_id if data.chat_id is not None else create_chat()
 
     history = load_chat_history(chat_id)
 
     if not history:
         update_chat_title(chat_id, data.user_input[:60] + ("..." if len(data.user_input) > 60 else ""))
 
-    result = graph.invoke({
-        "user_input": data.user_input,
-        "db_url": data.db_url,
-        "chat_history": history,
-    })
-    tool_result = result["tool_result"]
+    try:
+        result      = graph.invoke({
+            "user_input":  data.user_input,
+            "db_url":      data.db_url,
+            "chat_history": history,
+        })
+        tool_result = result["tool_result"]
 
-    save_message(chat_id=chat_id, role="user", content=data.user_input)
-    save_message(chat_id=chat_id, role="assistant",
-                 content=tool_result.get("answer", ""), tool_used=tool_result.get("tool"))
+        save_message(chat_id=chat_id, role="user",      content=data.user_input)
+        save_message(chat_id=chat_id, role="assistant", content=tool_result.get("answer", ""),
+                     tool_used=tool_result.get("tool"))
 
-    return {
-        "success": True,
-        "chat_id": chat_id,                 # always return — client must persist this
-        "is_new_chat": is_new_chat,
-        "response": tool_result,
-    }
+        return {
+            "success":    True,
+            "chat_id":    chat_id,
+            "is_new_chat": is_new_chat,
+            "response":   tool_result,
+        }
+
+    # ── Token / quota error for the Copilot pipeline ──────────────
+    except Exception as e:
+        if is_token_error(e):
+            return {
+                **token_error_response(str(e)[:120]),
+                "chat_id":    chat_id,
+                "is_new_chat": is_new_chat,
+            }
+        raise
 
 
 # ── Copilot session management ────────────────────────────────────

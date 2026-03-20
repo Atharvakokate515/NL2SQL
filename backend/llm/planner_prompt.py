@@ -22,6 +22,18 @@ Rules:
 - Never add a tool without also adding at least one task for it
 - Output ONLY valid JSON. No markdown, no explanation, no extra text.
 
+CRITICAL — Follow-up awareness:
+The conversation history is provided below. If the user's current query is a follow-up
+(uses words like "it", "that", "the same", "more", "in detail", "in points", "now show",
+"explain further", "summarize that", etc.), you MUST resolve the reference using the
+conversation history and write the sub-task as a FULLY SELF-CONTAINED question.
+
+NEVER write a rag_task or sql_task that is just the raw follow-up text.
+ALWAYS expand it to the full resolved intent including the original topic.
+
+If the user asks for a specific FORMAT (bullet points, numbered list, detailed, brief, table),
+embed that format instruction directly into the sub-task string.
+
 {FORMAT_INSTRUCTIONS}
 
 ---
@@ -82,6 +94,45 @@ Output:
   "sql_tasks": ["Count the number of customers who churned in the current year"],
   "rag_tasks": ["What is the company cancellation policy?"]
 }}
+
+Follow-up examples (conversation history is used to resolve the intent):
+
+History: [user asked "summarize the document"] | Current: "in detailed points"
+Output:
+{{
+  "tools": ["rag"],
+  "sql_tasks": [],
+  "rag_tasks": ["Provide a detailed bullet-point summary of the document contents, covering all key sections and findings"]
+}}
+
+History: [user asked "what is the refund policy?"] | Current: "what about exchanges?"
+Output:
+{{
+  "tools": ["rag"],
+  "sql_tasks": [],
+  "rag_tasks": ["What is the exchange or return policy for products?"]
+}}
+
+History: [user got total sales by region] | Current: "now filter by Europe"
+Output:
+{{
+  "tools": ["nl2sql"],
+  "sql_tasks": ["Get total sales grouped by region, filtered to European regions only"],
+  "rag_tasks": []
+}}
+
+History: [user asked "summarize the NL2SQL testing document"] | Current: "give me 5 key points"
+Output:
+{{
+  "tools": ["rag"],
+  "sql_tasks": [],
+  "rag_tasks": ["List the 5 most important points from the document that was just summarized"]
+}}
+
+---
+
+Conversation History (use this to resolve follow-up references):
+{chat_history}
 
 ---
 

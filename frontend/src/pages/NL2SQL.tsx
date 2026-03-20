@@ -8,8 +8,10 @@ import { ThinkingIndicator } from "@/components/common/ThinkingIndicator";
 import { DBConnectionModal } from "@/components/nl2sql/DBConnectionModal";
 import { ResultsPanel } from "@/components/nl2sql/ResultsPanel";
 import { Message, NL2SQLSession } from "@/types";
-import { getNl2sqlSessions, getSessionHistory, deleteNl2sqlSession, chatDb, createNl2sqlSession } from "@/api/client";
-import { ArrowLeft, Database } from "lucide-react";
+import {
+  getNl2sqlSessions, getSessionHistory, deleteNl2sqlSession,
+  chatDb, createNl2sqlSession, patchNl2sqlSession,
+} from "@/api/client";
 
 const NL2SQL = () => {
   const navigate = useNavigate();
@@ -46,15 +48,28 @@ const NL2SQL = () => {
       const hist = await getSessionHistory(id as string);
       setSessionId(id as string);
       const msgs: Message[] = [];
-      if (hist.history) {
-        for (const h of hist.history) {
-          if (h.role === "user") msgs.push({ id: crypto.randomUUID(), role: "user", content: h.content });
-          else msgs.push({ id: crypto.randomUUID(), role: "assistant", content: h.content?.summary || h.content || "", metadata: h.content });
+      const history = hist.chat_history || hist.history || [];
+      for (const h of history) {
+        if (h.role === "user") {
+          msgs.push({ id: crypto.randomUUID(), role: "user", content: h.content });
+        } else if (h.role === "assistant") {
+          let displayContent = "";
+          let metadata: Message["metadata"] = {};
+          if (typeof h.content === "string") {
+            try {
+              const parsed = JSON.parse(h.content);
+              displayContent = parsed.summary || parsed.answer || parsed.sql || h.content;
+              metadata = { sql: parsed.sql, summary: parsed.summary, chart: parsed.chart_suggestion, plan: parsed.plan, wasRetried: parsed.was_retried };
+            } catch { displayContent = h.content; }
+          } else if (typeof h.content === "object" && h.content !== null) {
+            displayContent = h.content.summary || h.content.answer || h.content.sql || "";
+            metadata = { sql: h.content.sql, summary: h.content.summary, chart: h.content.chart_suggestion, plan: h.content.plan, wasRetried: h.content.was_retried };
+          }
+          msgs.push({ id: crypto.randomUUID(), role: "assistant", content: displayContent, metadata });
         }
       }
       setMessages(msgs);
       if (hist.last_sql) setCurrentSql(hist.last_sql);
-      if (hist.last_execution) setCurrentExecution(hist.last_execution);
     } catch { /* ignore */ }
   };
 
@@ -73,14 +88,16 @@ const NL2SQL = () => {
     try { await deleteNl2sqlSession(id as string); } catch { /* ignore */ }
   };
 
+  const handleRename = async (id: string | number, title: string) => {
+    setSessions(prev => prev.map(s => s.session_id === id ? { ...s, title } : s));
+    try { await patchNl2sqlSession(id as string, title); } catch { loadSessions(); }
+  };
+
   const handleSend = async (text: string, clarResponse?: string, origInput?: string) => {
     let sid = sessionId;
     if (!sid) {
-      try {
-        const res = await createNl2sqlSession();
-        sid = res.session_id;
-        setSessionId(sid);
-      } catch { return; }
+      try { const res = await createNl2sqlSession(); sid = res.session_id; setSessionId(sid); }
+      catch { return; }
     }
 
     if (!clarResponse) {
@@ -90,7 +107,7 @@ const NL2SQL = () => {
     setThinking(true);
     try {
       const res = await chatDb({
-        db_url: dbUrl,
+        db_url:     dbUrl,
         user_input: clarResponse ? (origInput || text) : text,
         session_id: sid!,
         ...(clarResponse ? { clarification_response: clarResponse } : {}),
@@ -101,26 +118,43 @@ const NL2SQL = () => {
           id: crypto.randomUUID(), role: "clarification", content: res.question,
           metadata: { question: res.question, originalInput: clarResponse ? origInput : text }
         }]);
-      } else if (res.error) {
-        setMessages(prev => [...prev, { id: crypto.randomUUID(), role: "error", content: res.error, metadata: { errorCode: res.error_code } }]);
+      } else if (!res.success || res.error) {
+        // TOKEN_LIMIT → renders as banner in ChatMessage
+        // All other error codes → red bubble
+        setMessages(prev => [...prev, {
+          id:       crypto.randomUUID(),
+          role:     "error",
+          content:  res.error || "Something went wrong. Please try again.",
+          metadata: { errorCode: res.error_code || "UNKNOWN_ERROR" },
+        }]);
       } else {
         const msg: Message = {
-          id: crypto.randomUUID(), role: "assistant",
+          id:      crypto.randomUUID(),
+          role:    "assistant",
           content: res.summary || res.answer || "",
           metadata: {
-            sql: res.sql, summary: res.summary, chart: res.chart_suggestion,
-            execution: res.execution, plan: res.plan, wasRetried: res.was_retried,
-          }
+            sql:         res.generated_sql,
+            summary:     res.summary,
+            chart:       res.chart_suggestion,
+            execution:   res.execution,
+            plan:        res.plan,
+            wasRetried:  res.was_retried,
+          },
         };
         setMessages(prev => [...prev, msg]);
-        if (res.sql) setCurrentSql(res.sql);
-        if (res.execution) setCurrentExecution(res.execution);
+        if (res.generated_sql)    setCurrentSql(res.generated_sql);
+        if (res.execution)        setCurrentExecution(res.execution);
         if (res.chart_suggestion) setCurrentChart(res.chart_suggestion);
-        if (res.plan) setCurrentPlan(res.plan);
+        if (res.plan)             setCurrentPlan(res.plan);
       }
       loadSessions();
     } catch (e: any) {
-      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: "error", content: e.message }]);
+      setMessages(prev => [...prev, {
+        id:       crypto.randomUUID(),
+        role:     "error",
+        content:  e.message || "Network error. Please try again.",
+        metadata: { errorCode: "NETWORK_ERROR" },
+      }]);
     } finally { setThinking(false); }
   };
 
@@ -129,7 +163,7 @@ const NL2SQL = () => {
     const onMove = (e: MouseEvent) => {
       if (!dragging.current || !containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
-      const pct = ((e.clientY - rect.top) / rect.height) * 100;
+      const pct  = ((e.clientY - rect.top) / rect.height) * 100;
       setDividerPos(Math.max(25, Math.min(75, pct)));
     };
     const onUp = () => { dragging.current = false; };
@@ -139,8 +173,14 @@ const NL2SQL = () => {
   }, []);
 
   return (
-    <div className="flex h-screen bg-background">
+    <div className="flex h-screen bg-background overflow-hidden pt-12">
       <div className="animated-bg" />
+
+      <div className="corner-accent tl" />
+      <div className="corner-accent tr" />
+      <div className="corner-accent bl" />
+      <div className="corner-accent br" />
+
       <DBConnectionModal open={showModal} onClose={() => setShowModal(false)} />
 
       <AppSidebar
@@ -149,40 +189,72 @@ const NL2SQL = () => {
         activeId={sessionId}
         onSelect={selectSession}
         onDelete={handleDelete}
+        onRename={handleRename}
         onNew={handleNew}
         loading={sessionsLoading}
       />
 
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top bar */}
-        <div className="h-12 flex items-center justify-between px-4 border-b border-border bg-surface shrink-0">
-          <div className="flex items-center gap-3">
-            <button onClick={() => navigate("/")} className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
-              <ArrowLeft className="w-3 h-3" /> Home
-            </button>
-            <span className="text-sm text-foreground truncate">{sessionId ? sessions.find(s => s.session_id === sessionId)?.title || "Chat" : "New Chat"}</span>
-          </div>
+        {/* Slim context bar */}
+        <div className="h-10 flex items-center justify-between px-4 border-b border-border bg-surface/80 backdrop-blur-sm shrink-0">
+          <span className="text-sm text-foreground truncate font-medium">
+            {sessionId ? sessions.find(s => s.session_id === sessionId)?.title || "Chat" : "New Chat"}
+          </span>
           {connected && (
-            <button onClick={() => setShowModal(true)} className="flex items-center gap-2 bg-success/20 text-success px-3 py-1 rounded-full text-xs">
-              <span className="w-1.5 h-1.5 rounded-full bg-success" />
+            <button
+              onClick={() => setShowModal(true)}
+              className="flex items-center gap-1.5 bg-success/15 text-success px-2.5 py-1 rounded-full text-xs hover:bg-success/25 transition-colors"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
               {dbName}
             </button>
           )}
         </div>
 
-        {/* Main area with draggable divider */}
+        {/* Main split area */}
         <div ref={containerRef} className="flex-1 flex flex-col min-h-0">
+
+          {/* Chat pane */}
           <div style={{ height: `${dividerPos}%` }} className="flex flex-col min-h-0">
-            <div className="flex-1 overflow-y-auto p-4">
-              {messages.map(m => (
-                <ChatMessage key={m.id} message={m} onClarificationSubmit={(resp, orig) => handleSend(resp, resp, orig)} />
-              ))}
-              {thinking && <ThinkingIndicator />}
-              <div ref={chatEndRef} />
+            <div className="flex-1 overflow-y-auto py-4">
+              <div className="max-w-3xl mx-auto px-4">
+                {messages.length === 0 && (
+                  <div className="flex flex-col items-center justify-center h-48 gap-2 text-center">
+                    <p className="text-muted-foreground text-sm">Ask a question about your data</p>
+                    <p className="text-muted-foreground/50 text-xs">e.g. "Show total revenue by region last quarter"</p>
+                  </div>
+                )}
+                {messages.map(m => (
+                  <ChatMessage
+                    key={m.id}
+                    message={m}
+                    onClarificationSubmit={(resp, orig) => handleSend(resp, resp, orig)}
+                  />
+                ))}
+                {thinking && (
+                  <div className="flex justify-start mb-3">
+                    <div className="bg-surface border border-border rounded-xl px-4 py-3">
+                      <ThinkingIndicator />
+                    </div>
+                  </div>
+                )}
+                <div ref={chatEndRef} />
+              </div>
             </div>
-            <ChatInput onSend={handleSend} disabled={thinking || !connected} placeholder="Ask a question about your data..." />
+            <ChatInput
+              onSend={handleSend}
+              disabled={thinking || !connected}
+              placeholder={connected ? "Ask a question about your data…" : "Connect to a database to start"}
+            />
           </div>
-          <div onMouseDown={onMouseDown} className="h-1.5 bg-border hover:bg-primary/50 cursor-row-resize shrink-0 transition-colors" />
+
+          {/* Drag handle */}
+          <div
+            onMouseDown={onMouseDown}
+            className="h-1.5 bg-border hover:bg-primary/40 cursor-row-resize shrink-0 transition-colors"
+          />
+
+          {/* Results pane */}
           <div style={{ height: `${100 - dividerPos}%` }} className="min-h-0">
             <ResultsPanel sql={currentSql} execution={currentExecution} chart={currentChart} plan={currentPlan} />
           </div>

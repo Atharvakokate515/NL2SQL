@@ -1,10 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useApp } from "@/context/AppContext";
 import { Modal } from "@/components/common/Modal";
 import { uploadDoc, getDocs, deleteDoc } from "@/api/client";
 import { DocInfo } from "@/types";
 import { Trash2, Upload, Loader2, FileText } from "lucide-react";
-import { useEffect } from "react";
 
 interface DocUploadModalProps {
   open: boolean;
@@ -22,8 +21,20 @@ export const DocUploadModal = ({ open, onClose }: DocUploadModalProps) => {
     setLoading(true);
     try {
       const data = await getDocs();
-      setDocs(data || []);
-    } catch { /* ignore */ } finally { setLoading(false); }
+      // Backend returns { success: true, documents: [...] } — NOT a plain array.
+      // Guard against both shapes so a wrong type never crashes .map()
+      if (Array.isArray(data)) {
+        setDocs(data);
+      } else if (data && Array.isArray((data as any).documents)) {
+        setDocs((data as any).documents);
+      } else {
+        setDocs([]);
+      }
+    } catch {
+      setDocs([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { if (open) loadDocs(); }, [open]);
@@ -38,7 +49,9 @@ export const DocUploadModal = ({ open, onClose }: DocUploadModalProps) => {
       loadDocs();
     } catch {
       setUploadStatus("Upload failed.");
-    } finally { setUploading(false); }
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleDelete = async (source: string) => {
@@ -57,28 +70,41 @@ export const DocUploadModal = ({ open, onClose }: DocUploadModalProps) => {
         {/* Doc list */}
         <div className="max-h-48 overflow-y-auto space-y-2">
           {loading ? (
-            <div className="flex items-center justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+            </div>
           ) : docs.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">No documents uploaded yet.</p>
-          ) : docs.map(d => (
-            <div key={d.source} className="flex items-center justify-between bg-background border border-border rounded-lg px-3 py-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <FileText className="w-4 h-4 text-primary shrink-0" />
-                <div className="min-w-0">
-                  <p className="text-sm text-foreground truncate">{d.source}</p>
-                  <p className="text-xs text-muted-foreground">{d.chunk_count} chunks</p>
+          ) : (
+            docs.map(d => (
+              <div key={d.source} className="flex items-center justify-between bg-background border border-border rounded-lg px-3 py-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <FileText className="w-4 h-4 text-primary shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm text-foreground truncate">{d.source}</p>
+                    <p className="text-xs text-muted-foreground">{d.chunk_count} chunks</p>
+                  </div>
                 </div>
+                <button
+                  onClick={() => handleDelete(d.source)}
+                  className="p-1 rounded hover:bg-destructive/20 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                </button>
               </div>
-              <button onClick={() => handleDelete(d.source)} className="p-1 rounded hover:bg-destructive/20 transition-colors">
-                <Trash2 className="w-3.5 h-3.5 text-destructive" />
-              </button>
-            </div>
-          ))}
+            ))
+          )}
         </div>
 
-        {/* Upload */}
+        {/* Upload drop zone */}
         <label className="block border-2 border-dashed border-border rounded-xl p-6 text-center cursor-pointer hover:border-primary/50 transition-colors">
-          <input type="file" accept=".pdf" className="hidden" onChange={e => handleUpload(e.target.files)} disabled={uploading} />
+          <input
+            type="file"
+            accept=".pdf"
+            className="hidden"
+            onChange={e => handleUpload(e.target.files)}
+            disabled={uploading}
+          />
           {uploading ? (
             <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto" />
           ) : (
@@ -92,10 +118,9 @@ export const DocUploadModal = ({ open, onClose }: DocUploadModalProps) => {
 
         <button
           onClick={handleStart}
-          disabled={docs.length === 0}
-          className="w-full bg-primary text-primary-foreground rounded-lg py-2.5 text-sm font-medium hover:bg-primary/80 disabled:opacity-50 transition-all"
+          className="w-full bg-primary text-primary-foreground rounded-lg py-2.5 text-sm font-medium hover:bg-primary/80 transition-all"
         >
-          Start Chatting
+          {docs.length === 0 ? "Skip & Start Chatting" : "Start Chatting"}
         </button>
       </div>
     </Modal>

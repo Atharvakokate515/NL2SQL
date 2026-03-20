@@ -55,17 +55,25 @@ export const getCopilotHistory = (id: number) =>
 export const deleteCopilotSession = (id: number) =>
   request<any>(`/copilot-sessions/${id}`, { method: "DELETE" });
 
+// Previously missing — needed for Copilot rename
+export const patchCopilotSession = (id: number, title: string) =>
+  request<any>(`/copilot-sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title }) });
+
 // Docs
+// Backend returns { success: true, documents: DocInfo[] } — NOT a plain array
 export const uploadDoc = (file: File) => {
   const fd = new FormData();
-  fd.append("file", file);
+  // Pass file.name explicitly as the third argument so the browser sends the real
+  // filename in Content-Disposition rather than a temp object URL like "tmpx9u1zq16.pdf"
+  fd.append("file", file, file.name);
   return fetch(`${BASE}/upload-doc`, { method: "POST", body: fd }).then(r => {
     if (!r.ok) throw new Error("Upload failed");
     return r.json();
   });
 };
 
-export const getDocs = () => request<any[]>("/docs");
+export const getDocs = () =>
+  request<{ success: boolean; documents: any[] }>("/docs");
 
 export const deleteDoc = (source: string) =>
   request<any>(`/docs/${encodeURIComponent(source)}`, { method: "DELETE" });

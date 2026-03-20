@@ -38,16 +38,15 @@ def _format_rag_results(rag_results: list) -> str:
 
 def _extract_citations(rag_results: list) -> list[dict]:
     """
-    Point 2 — Structured citations as list of dicts instead of a plain string.
+    Structured citations as list of dicts instead of a plain string.
     Each dict: {"source": str, "page": int, "confidence": float}
-    Frontend can now render clickable links, page previews, confidence badges.
     """
     citations = []
     for item in rag_results:
         for c in item["result"].get("citations", []):
             citations.append({
-                "source": c["source"],
-                "page": c["page"],
+                "source":     c["source"],
+                "page":       c["page"],
                 "confidence": round(1 - c["score"], 3)
             })
     return citations
@@ -64,10 +63,8 @@ def _format_citations_for_prompt(citations: list[dict]) -> str:
 
 def _is_answer_grounded(rag_results: list, citations: list[dict]) -> bool:
     """
-    Point 4 — True if the answer is grounded in retrieved document evidence.
+    True if the answer is grounded in retrieved document evidence.
     Grounded = RAG was used AND at least one citation has confidence >= 0.5.
-    If False, the LLM may have answered from general knowledge rather than
-    your documents — frontend should warn the user accordingly.
     """
     if not rag_results or not citations:
         return False
@@ -76,15 +73,21 @@ def _is_answer_grounded(rag_results: list, citations: list[dict]) -> bool:
 
 def synthesize_answer(state: dict) -> dict:
 
-    user_query = state["user_input"]
+    existing_tool_result = state.get("tool_result")
+    if existing_tool_result and existing_tool_result.get("tool") == "chat":
+        # Chat tool already produced the final answer — pass it through unchanged
+        return {"tool_result": existing_tool_result}
+    # ─────────────────────────────────────────────────────────────
+
+    user_query  = state["user_input"]
     sql_results = state.get("sql_results", [])
     rag_results = state.get("rag_results", [])
 
     formatted_sql = _format_sql_results(sql_results)
     formatted_rag = _format_rag_results(rag_results)
 
-    citations = _extract_citations(rag_results)                     # Point 2
-    citations_for_prompt = _format_citations_for_prompt(citations)
+    citations             = _extract_citations(rag_results)
+    citations_for_prompt  = _format_citations_for_prompt(citations)
 
     # ── REASONING LAYER HOOK (commented out) ─────────────────────
     # reasoning_output = None
@@ -105,11 +108,11 @@ def synthesize_answer(state: dict) -> dict:
 
     return {
         "tool_result": {
-            "tool": "synthesis",
-            "answer": response,
-            "sql_used": bool(sql_results),
-            "rag_used": bool(rag_results),
-            "citations": citations if citations else None,   # Point 2 — list of dicts
-            "answer_grounded": _is_answer_grounded(rag_results, citations)  # Point 4
+            "tool":           "synthesis",
+            "answer":         response,
+            "sql_used":       bool(sql_results),
+            "rag_used":       bool(rag_results),
+            "citations":      citations if citations else None,
+            "answer_grounded": _is_answer_grounded(rag_results, citations)
         }
     }
