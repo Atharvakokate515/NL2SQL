@@ -1,56 +1,38 @@
-# fastapi
-# uvicorn
-
-# psycopg2-binary
-
-# langgraph
-# langchain
-
-# transformers
-# torch
-# accelerate
-
-# python-dotenv
-# pydantic
-
-# matplotlib
-# pandas
-
-# backend/requirements.txt
-# ── Web framework ──────────────────────────────────────────────────────────
+# ── Web framework ─────────────────────────────────────────────────
 fastapi
 uvicorn[standard]
-python-multipart          # required for FastAPI file uploads (UploadFile)
+python-multipart
 
-# ── Database ───────────────────────────────────────────────────────────────
-psycopg2-binary           # PostgreSQL driver
-sqlalchemy                # ORM used by memory/ and rag/
+# ── Database ──────────────────────────────────────────────────────
+psycopg2-binary
+sqlalchemy
 
-# ── LLM & LangChain ────────────────────────────────────────────────────────
+# ── LLM & LangChain ──────────────────────────────────────────────
 langchain
 langchain-core
-langchain-community       # HuggingFaceEmbeddings, Chroma vectorstore
-langchain-text-splitters  # RecursiveCharacterTextSplitter
-langchain-huggingface     # HuggingFaceEndpoint + ChatHuggingFace (llm/client.py)
-langgraph                 # graph/ pipeline
+langchain-community
+langchain-text-splitters
+langchain-huggingface
+langchain-chroma          # ← ADDED: used in rag/ingest.py and rag/rag_tool.py
+langgraph
 
-# ── HuggingFace inference ──────────────────────────────────────────────────
-huggingface-hub           # API token auth, model downloads
-transformers              # tokenizers + model loading
-torch                     # required by transformers
-accelerate                # faster model loading (used in requirements already)
-sentence-transformers     # SentenceTransformer used in practice.py / embeddings
+# ── HuggingFace inference ─────────────────────────────────────────
+huggingface-hub
+transformers
+torch
+accelerate
+sentence-transformers
 
-# ── Vector store ───────────────────────────────────────────────────────────
-chromadb                  # rag/rag_db.py, rag/ingest.py
+# ── Vector store ──────────────────────────────────────────────────
+chromadb
 
-# ── PDF processing ─────────────────────────────────────────────────────────
-pypdf                     # PdfReader used in rag/ingest.py
+# ── PDF processing ────────────────────────────────────────────────
+pypdf
 
-# ── Utilities ──────────────────────────────────────────────────────────────
-python-dotenv             # load_dotenv() in llm/client.py
-pydantic                  # request/response models throughout
+# ── Utilities ─────────────────────────────────────────────────────
+python-dotenv
+pydantic
 
-# ── Visualisation (used in visualization/charts.py) ────────────────────────
+# ── Visualisation ─────────────────────────────────────────────────
 matplotlib
 pandas
