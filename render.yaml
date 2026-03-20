@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: datamind-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: |
+      pip install torch --index-url https://download.pytorch.org/whl/cpu
+      pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
+    envVars:
+      - key: LLM_PROVIDER
+        sync: false
+      - key: HUGGINGFACEHUB_API_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+```
+
+---
+
+**And in `requirements.txt` remove these 3 lines:**
+```
+torch          ← remove
+accelerate     ← remove
+transformers   ← remove
