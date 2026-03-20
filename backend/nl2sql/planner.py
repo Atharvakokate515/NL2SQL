@@ -66,11 +66,10 @@ def plan_query(
             "FORMAT_INSTRUCTIONS": nl2sql_planner_parser.get_format_instructions()
         })
     except OutputParserException as e:
-        # Catch parsing errors and inspect raw output
-        print("Failed to parse LLM output!")
-        print("Raw output:", e.args)
+        print("Planner parse failed:", str(e.args)[:200])
+        raise ValueError(f"Failed to plan query: {str(e.args[0])[:200]}")
 
-    return plan 
+    return plan
 
 
 

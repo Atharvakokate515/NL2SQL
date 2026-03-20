@@ -1,5 +1,6 @@
 # backend/nl2sql/generator.py
 
+import re
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers.pydantic import OutputParserException
 
@@ -7,7 +8,7 @@ from llm.client import llm
 from llm.schema_parser import schema_parser
 from llm.nl2sql_prompts import NL2SQL_PROMPT
 
-from core.nl2sql_plan_schema import NL2SQLPlan   # fixed: was "backend.core..." which breaks when run as a module
+from core.nl2sql_plan_schema import NL2SQLPlan
 
 from db.schema import get_schema
 from db.schema_descriptions import generate_schema_descriptions
@@ -21,7 +22,6 @@ def clean_sql(sql: str) -> str:
 
 
 def format_chat_history(history: list[dict]) -> str:
-    """Convert list of {role, content} dicts to a readable string for the prompt."""
     if not history:
         return "No prior conversation."
     lines = []
@@ -32,30 +32,33 @@ def format_chat_history(history: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _extract_sql_from_error(error_str: str) -> str | None:
+    """Try to pull the SQL string out of a malformed JSON parser error."""
+    # Pattern: "sql": "SELECT ..."  possibly with escaped quotes inside
+    match = re.search(r'"sql"\s*:\s*"((?:[^"\\]|\\.)*)"', error_str)
+    if match:
+        return match.group(1).replace('\\"', '"').replace('\\n', ' ').strip()
+    # Fallback: grab anything that looks like a SELECT statement
+    match = re.search(r'(SELECT\s+.+?)(?:\\n|"|}|$)', error_str, re.IGNORECASE | re.DOTALL)
+    if match:
+        return match.group(1).replace('\\n', ' ').strip()
+    return None
+
+
 def generate_sql(
     user_input: str,
     db_url: str,
     plan: NL2SQLPlan,
     last_sql: str | None = None,
     chat_history: list[dict] | None = None,
-    error_feedback: str | None = None,     # set on retry: the execution error message
-    failed_sql: str | None = None,         # set on retry: the SQL that caused the error
+    error_feedback: str | None = None,
+    failed_sql: str | None = None,
 ) -> str:
-    """
-    Generate a SQL query from a user's NL request, guided by a structured plan.
-
-    Returns a single cleaned SQL string.
-
-    On retry (error_feedback + failed_sql provided), uses NL2SQL_RETRY_PROMPT so the
-    LLM sees its own mistake and the error message, which significantly improves
-    correction accuracy.
-    """
 
     raw_schema = get_schema(db_url)
     enriched_schema = generate_schema_descriptions(raw_schema)
     history_text = format_chat_history(chat_history or [])
 
-    # ── Choose prompt: retry path vs normal path ──────────────────
     if error_feedback and failed_sql:
         from llm.nl2sql_prompts import NL2SQL_RETRY_PROMPT
         prompt = PromptTemplate(
@@ -104,33 +107,19 @@ def generate_sql(
         invoke_args["failed_sql"] = failed_sql
         invoke_args["error_feedback"] = error_feedback
 
-    
     try:
         raw_output = chain.invoke(invoke_args)
     except OutputParserException as e:
-        # Catch parsing errors and inspect raw output
-        print("Failed to parse LLM output!")
-        print("Raw output:", e.args)
-
+        # LLM produced valid SQL but in malformed JSON — try to extract it
+        error_str = str(e.args[0]) if e.args else ""
+        print(f"[generator] OutputParserException — attempting SQL extraction from raw output")
+        extracted = _extract_sql_from_error(error_str)
+        if extracted:
+            print(f"[generator] Extracted SQL: {extracted[:100]}...")
+            return clean_sql(extracted)
+        raise ValueError(
+            f"LLM failed to produce parseable SQL output. "
+            f"Raw error: {error_str[:300]}"
+        )
 
     return clean_sql(raw_output.sql)
-
-
-if __name__ == "__main__":
-    from nl2sql.planner import plan_query
-
-    print("── Generator Test ──")
-    user_input = "how many tables are there"
-    db_url = "postgresql://postgres:root@localhost:5432/classicmodels"
-
-    plan = plan_query(user_input=user_input, db_url=db_url)
-
-    print("==="*30)
-    print("this is the plan intent   ---> ",plan.intent_summary)
-    print("==="*30)
-    print("this is the columns   ---> ",plan.candidate_columns)
-    print("==="*30)
-    print("this is the tables   ---> ",plan.candidate_tables)
-    print("=="*40)
-    sql = generate_sql(user_input=user_input, db_url=db_url, plan=plan)
-    print("\nSQL:", sql)
