@@ -1,3 +1,7 @@
+// frontend/src/components/nl2sql/DBConnectionModal.tsx
+// CHANGE: info banner text colour fixed from text-muted-foreground → text-foreground/85
+//         so the "Only hosted databases are supported" notice is clearly readable
+
 import { useState } from "react";
 import { testConnection } from "@/api/client";
 import { useApp } from "@/context/AppContext";
@@ -9,7 +13,6 @@ interface DBConnectionModalProps {
   onClose?: () => void;
 }
 
-// ── Parse VITE_DEFAULT_DB_URL into form fields ──────────────────
 const parseUrl = (url: string) => {
   try {
     const u = new URL(url);
@@ -24,12 +27,10 @@ const parseUrl = (url: string) => {
 };
 
 const defaults = parseUrl(import.meta.env.VITE_DEFAULT_DB_URL || "");
-// ───────────────────────────────────────────────────────────────
 
 export const DBConnectionModal = ({ open, onClose }: DBConnectionModalProps) => {
   const { setDb, connected } = useApp();
 
-  // Pre-fill from env variable if available, otherwise show empty defaults
   const [host,     setHost]     = useState(defaults?.host     || "localhost");
   const [port,     setPort]     = useState(defaults?.port     || "5432");
   const [database, setDatabase] = useState(defaults?.database || "");
@@ -58,40 +59,42 @@ export const DBConnectionModal = ({ open, onClose }: DBConnectionModalProps) => 
     }
   };
 
-  const inputClass = "w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/50 focus:border-primary/50 outline-none transition-all";
+  const inputClass =
+    "w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground " +
+    "placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/50 focus:border-primary/50 outline-none transition-all";
 
   return (
     <Modal open={open} onClose={connected ? onClose : undefined} title="Connect to Database" showClose={connected}>
       <div className="space-y-3">
 
-        {/* ── Hosted DB notice ── */}
+        {/* ── Info banner — FIX: text-foreground/85 so it's clearly readable ── */}
         <div className="flex gap-2 bg-primary/10 border border-primary/25 rounded-lg px-3 py-2.5">
           <Info className="w-4 h-4 text-primary-light shrink-0 mt-0.5" />
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            Only <span className="text-foreground font-medium">hosted databases</span> are supported —
-            e.g. <span className="text-foreground">Supabase, Neon, Railway, Render Postgres</span>.
+          <p className="text-xs text-foreground/85 leading-relaxed">
+            Only <span className="text-foreground font-semibold">hosted databases</span> are supported —
+            e.g. <span className="text-foreground font-medium">Supabase, Neon, Railway, Render Postgres</span>.
             Local databases running on your machine cannot be reached.
           </p>
         </div>
 
         <div>
-          <label className="text-xs text-muted-foreground mb-1 block">Host</label>
+          <label className="text-xs text-foreground/60 mb-1 block">Host</label>
           <input value={host} onChange={e => setHost(e.target.value)} className={inputClass} />
         </div>
         <div>
-          <label className="text-xs text-muted-foreground mb-1 block">Port</label>
+          <label className="text-xs text-foreground/60 mb-1 block">Port</label>
           <input value={port} onChange={e => setPort(e.target.value)} className={inputClass} />
         </div>
         <div>
-          <label className="text-xs text-muted-foreground mb-1 block">Database</label>
+          <label className="text-xs text-foreground/60 mb-1 block">Database</label>
           <input value={database} onChange={e => setDatabase(e.target.value)} placeholder="mydb" className={inputClass} />
         </div>
         <div>
-          <label className="text-xs text-muted-foreground mb-1 block">Username</label>
+          <label className="text-xs text-foreground/60 mb-1 block">Username</label>
           <input value={username} onChange={e => setUsername(e.target.value)} className={inputClass} />
         </div>
         <div>
-          <label className="text-xs text-muted-foreground mb-1 block">Password</label>
+          <label className="text-xs text-foreground/60 mb-1 block">Password</label>
           <input value={password} onChange={e => setPassword(e.target.value)} type="password" className={inputClass} />
         </div>
 

@@ -4,7 +4,7 @@
 //   + import BookOpen from lucide-react
 //   + const [showHowTo, setShowHowTo] = useState(false);
 //   + <HowToUseModal> rendered in JSX
-//   + "How to Use" button in context bar
+//   + "How to Use" button — yellow/warning colour for visibility
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
@@ -15,19 +15,19 @@ import { ChatInput } from "@/components/common/ChatInput";
 import { ThinkingIndicator } from "@/components/common/ThinkingIndicator";
 import { DBConnectionModal } from "@/components/nl2sql/DBConnectionModal";
 import { ResultsPanel } from "@/components/nl2sql/ResultsPanel";
-import { HowToUseModal } from "@/components/common/HowToUseModal";   // ← NEW
+import { HowToUseModal } from "@/components/common/HowToUseModal";
 import { Message, NL2SQLSession } from "@/types";
 import {
   getNl2sqlSessions, getSessionHistory, deleteNl2sqlSession,
   chatDb, createNl2sqlSession, patchNl2sqlSession,
 } from "@/api/client";
-import { BookOpen } from "lucide-react";   // ← NEW
+import { BookOpen } from "lucide-react";
 
 const NL2SQL = () => {
   const navigate = useNavigate();
   const { connected, dbUrl, dbName } = useApp();
   const [showModal, setShowModal] = useState(!connected);
-  const [showHowTo, setShowHowTo] = useState(false);   // ← NEW
+  const [showHowTo, setShowHowTo] = useState(false);
   const [sessions, setSessions] = useState<NL2SQLSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -184,20 +184,13 @@ const NL2SQL = () => {
   return (
     <div className="flex h-screen bg-background overflow-hidden pt-12">
       <div className="animated-bg" />
-
       <div className="corner-accent tl" />
       <div className="corner-accent tr" />
       <div className="corner-accent bl" />
       <div className="corner-accent br" />
 
       <DBConnectionModal open={showModal} onClose={() => setShowModal(false)} />
-
-      {/* ── NEW: How to Use Modal ── */}
-      <HowToUseModal
-        open={showHowTo}
-        onClose={() => setShowHowTo(false)}
-        pipeline="nl2sql"
-      />
+      <HowToUseModal open={showHowTo} onClose={() => setShowHowTo(false)} pipeline="nl2sql" />
 
       <AppSidebar
         label="Chats"
@@ -217,12 +210,14 @@ const NL2SQL = () => {
             {sessionId ? sessions.find(s => s.session_id === sessionId)?.title || "Chat" : "New Chat"}
           </span>
 
-          {/* ── Right side: db badge + How to Use button ── */}
           <div className="flex items-center gap-2 shrink-0">
-            {/* ── NEW: How to Use button ── */}
+            {/* FIX: yellow/warning colour for high visibility */}
             <button
               onClick={() => setShowHowTo(true)}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary-light transition-colors px-2 py-1 rounded-lg hover:bg-accent"
+              className="flex items-center gap-1.5 text-xs font-medium
+                         bg-warning/15 text-warning border border-warning/35
+                         hover:bg-warning/25 hover:border-warning/55
+                         transition-all px-2.5 py-1 rounded-lg"
             >
               <BookOpen className="w-3.5 h-3.5" />
               How to Use
@@ -242,8 +237,6 @@ const NL2SQL = () => {
 
         {/* Main split area */}
         <div ref={containerRef} className="flex-1 flex flex-col min-h-0">
-
-          {/* Chat pane */}
           <div style={{ height: `${dividerPos}%` }} className="flex flex-col min-h-0">
             <div className="flex-1 overflow-y-auto py-4">
               <div className="max-w-3xl mx-auto px-4">
@@ -251,10 +244,11 @@ const NL2SQL = () => {
                   <div className="flex flex-col items-center justify-center h-48 gap-2 text-center">
                     <p className="text-muted-foreground text-sm">Ask a question about your data</p>
                     <p className="text-muted-foreground/50 text-xs">e.g. "Show total revenue by region last quarter"</p>
-                    {/* ── NEW: inline hint to open How to Use ── */}
                     <button
                       onClick={() => setShowHowTo(true)}
-                      className="mt-2 flex items-center gap-1.5 text-xs text-primary-light/70 hover:text-primary-light transition-colors"
+                      className="mt-2 flex items-center gap-1.5 text-xs font-medium
+                                 bg-warning/15 text-warning border border-warning/30
+                                 hover:bg-warning/25 transition-all px-2.5 py-1 rounded-lg"
                     >
                       <BookOpen className="w-3 h-3" />
                       See sample queries for FinLend Capital
@@ -285,13 +279,11 @@ const NL2SQL = () => {
             />
           </div>
 
-          {/* Drag handle */}
           <div
             onMouseDown={onMouseDown}
             className="h-1.5 bg-border hover:bg-primary/40 cursor-row-resize shrink-0 transition-colors"
           />
 
-          {/* Results pane */}
           <div style={{ height: `${100 - dividerPos}%` }} className="min-h-0">
             <ResultsPanel sql={currentSql} execution={currentExecution} chart={currentChart} plan={currentPlan} />
           </div>
