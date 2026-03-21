@@ -1,3 +1,11 @@
+// frontend/src/pages/Copilot.tsx
+// CHANGES FROM ORIGINAL:
+//   + import HowToUseModal
+//   + import BookOpen from lucide-react
+//   + const [showHowTo, setShowHowTo] = useState(false);
+//   + <HowToUseModal> rendered in JSX
+//   + "How to Use" button in context bar
+
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useApp } from "@/context/AppContext";
 import { AppSidebar } from "@/components/common/Sidebar";
@@ -5,18 +13,20 @@ import { ChatMessage } from "@/components/common/ChatMessage";
 import { ChatInput } from "@/components/common/ChatInput";
 import { ThinkingIndicator } from "@/components/common/ThinkingIndicator";
 import { DocUploadModal } from "@/components/copilot/DocUploadModal";
+import { HowToUseModal } from "@/components/common/HowToUseModal";   // ← NEW
 import { Message, CopilotSession } from "@/types";
 import {
   getCopilotSessions, getCopilotHistory, deleteCopilotSession,
   agentChat, createChat, patchCopilotSession,
 } from "@/api/client";
-import { FileText } from "lucide-react";
+import { FileText, BookOpen } from "lucide-react";   // ← BookOpen NEW
 import { useNavigate } from "react-router-dom";
 
 const Copilot = () => {
   const navigate = useNavigate();
   const { docsReady, dbUrl } = useApp();
   const [showModal, setShowModal] = useState(!docsReady);
+  const [showHowTo, setShowHowTo] = useState(false);   // ← NEW
   const [sessions, setSessions] = useState<CopilotSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [chatId, setChatId] = useState<number | null>(null);
@@ -91,8 +101,6 @@ const Copilot = () => {
       const res = await agentChat({ db_url: dbUrl || "", user_input: text, chat_id: cid! });
 
       if (!res.success || res.error) {
-        // TOKEN_LIMIT → renders as banner in ChatMessage
-        // All other error codes → red bubble
         setMessages(prev => [...prev, {
           id:       crypto.randomUUID(),
           role:     "error",
@@ -136,6 +144,13 @@ const Copilot = () => {
 
       <DocUploadModal open={showModal} onClose={() => setShowModal(false)} />
 
+      {/* ── NEW: How to Use Modal ── */}
+      <HowToUseModal
+        open={showHowTo}
+        onClose={() => setShowHowTo(false)}
+        pipeline="copilot"
+      />
+
       <AppSidebar
         label="Chats"
         sessions={sessions.map(s => ({ id: s.chat_id, title: s.title, updated_at: s.updated_at }))}
@@ -153,13 +168,26 @@ const Copilot = () => {
           <span className="text-sm text-foreground truncate font-medium">
             {chatId ? sessions.find(s => s.chat_id === chatId)?.title || "Chat" : "New Chat"}
           </span>
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center gap-1.5 text-primary-light text-xs hover:text-foreground transition-colors"
-          >
-            <FileText className="w-3.5 h-3.5" />
-            Manage Docs
-          </button>
+
+          {/* ── Right side: How to Use + Manage Docs ── */}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* ── NEW: How to Use button ── */}
+            <button
+              onClick={() => setShowHowTo(true)}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary-light transition-colors px-2 py-1 rounded-lg hover:bg-accent"
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              How to Use
+            </button>
+
+            <button
+              onClick={() => setShowModal(true)}
+              className="flex items-center gap-1.5 text-primary-light text-xs hover:text-foreground transition-colors"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              Manage Docs
+            </button>
+          </div>
         </div>
 
         {/* Chat area */}
@@ -170,6 +198,14 @@ const Copilot = () => {
                 <div className="flex flex-col items-center justify-center h-48 gap-2 text-center">
                   <p className="text-muted-foreground text-sm">Ask a question about your documents</p>
                   <p className="text-muted-foreground/50 text-xs">Upload PDFs and ask anything — citations included</p>
+                  {/* ── NEW: inline hint to open How to Use ── */}
+                  <button
+                    onClick={() => setShowHowTo(true)}
+                    className="mt-2 flex items-center gap-1.5 text-xs text-primary-light/70 hover:text-primary-light transition-colors"
+                  >
+                    <BookOpen className="w-3 h-3" />
+                    See sample queries for FinLend Capital
+                  </button>
                 </div>
               )}
               {messages.map(m => <ChatMessage key={m.id} message={m} />)}
