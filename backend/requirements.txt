@@ -13,15 +13,12 @@ langchain-core
 langchain-community
 langchain-text-splitters
 langchain-huggingface
-langchain-chroma          # ← ADDED: used in rag/ingest.py and rag/rag_tool.py
+langchain-chroma
+langchain-openai              # OpenAI LLM + embeddings
 langgraph
 
-# ── HuggingFace inference ─────────────────────────────────────────
+# ── HuggingFace inference (API only, no local models) ────────────
 huggingface-hub
-transformers
-torch
-accelerate
-sentence-transformers
 
 # ── Vector store ──────────────────────────────────────────────────
 chromadb
@@ -32,7 +29,3 @@ pypdf
 # ── Utilities ─────────────────────────────────────────────────────
 python-dotenv
 pydantic
-
-# ── Visualisation ─────────────────────────────────────────────────
-matplotlib
-pandas
