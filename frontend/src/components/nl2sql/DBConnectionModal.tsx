@@ -2,22 +2,42 @@ import { useState } from "react";
 import { testConnection } from "@/api/client";
 import { useApp } from "@/context/AppContext";
 import { Modal } from "@/components/common/Modal";
-import { Loader2 } from "lucide-react";
+import { Loader2, Info } from "lucide-react";
 
 interface DBConnectionModalProps {
   open: boolean;
   onClose?: () => void;
 }
 
+// ── Parse VITE_DEFAULT_DB_URL into form fields ──────────────────
+const parseUrl = (url: string) => {
+  try {
+    const u = new URL(url);
+    return {
+      host:     u.hostname,
+      port:     u.port || "5432",
+      database: u.pathname.slice(1),
+      username: u.username,
+      password: decodeURIComponent(u.password),
+    };
+  } catch { return null; }
+};
+
+const defaults = parseUrl(import.meta.env.VITE_DEFAULT_DB_URL || "");
+// ───────────────────────────────────────────────────────────────
+
 export const DBConnectionModal = ({ open, onClose }: DBConnectionModalProps) => {
   const { setDb, connected } = useApp();
-  const [host, setHost] = useState("localhost");
-  const [port, setPort] = useState("5432");
-  const [database, setDatabase] = useState("");
-  const [username, setUsername] = useState("postgres");
-  const [password, setPassword] = useState("");
+
+  // Pre-fill from env variable if available, otherwise show empty defaults
+  const [host,     setHost]     = useState(defaults?.host     || "localhost");
+  const [port,     setPort]     = useState(defaults?.port     || "5432");
+  const [database, setDatabase] = useState(defaults?.database || "");
+  const [username, setUsername] = useState(defaults?.username || "postgres");
+  const [password, setPassword] = useState(defaults?.password || "");
+
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [error,   setError]   = useState("");
 
   const handleConnect = async () => {
     const url = `postgresql://${username}:${password}@${host}:${port}/${database}`;
@@ -43,6 +63,17 @@ export const DBConnectionModal = ({ open, onClose }: DBConnectionModalProps) => 
   return (
     <Modal open={open} onClose={connected ? onClose : undefined} title="Connect to Database" showClose={connected}>
       <div className="space-y-3">
+
+        {/* ── Hosted DB notice ── */}
+        <div className="flex gap-2 bg-primary/10 border border-primary/25 rounded-lg px-3 py-2.5">
+          <Info className="w-4 h-4 text-primary-light shrink-0 mt-0.5" />
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Only <span className="text-foreground font-medium">hosted databases</span> are supported —
+            e.g. <span className="text-foreground">Supabase, Neon, Railway, Render Postgres</span>.
+            Local databases running on your machine cannot be reached.
+          </p>
+        </div>
+
         <div>
           <label className="text-xs text-muted-foreground mb-1 block">Host</label>
           <input value={host} onChange={e => setHost(e.target.value)} className={inputClass} />
@@ -63,7 +94,9 @@ export const DBConnectionModal = ({ open, onClose }: DBConnectionModalProps) => 
           <label className="text-xs text-muted-foreground mb-1 block">Password</label>
           <input value={password} onChange={e => setPassword(e.target.value)} type="password" className={inputClass} />
         </div>
+
         {error && <p className="text-sm text-destructive">{error}</p>}
+
         <button
           onClick={handleConnect}
           disabled={loading || !database}
@@ -72,6 +105,7 @@ export const DBConnectionModal = ({ open, onClose }: DBConnectionModalProps) => 
           {loading && <Loader2 className="w-4 h-4 animate-spin" />}
           {loading ? "Connecting..." : "Connect"}
         </button>
+
       </div>
     </Modal>
   );
