@@ -117,6 +117,7 @@ def get_table_list(db_url: str) -> list[str]:
     return tables
 
 
+# Dead-code *********** ******** ******** ********** *********
 def get_schema_preview(db_url: str) -> tuple[list[dict], str]:
     """
     Return structured schema for the frontend workspace header / inspector,
