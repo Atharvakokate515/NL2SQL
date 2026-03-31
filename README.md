@@ -33,6 +33,28 @@ Executor         → Run query; auto-retry with error feedback on failure
 Summary + Chart  → Plain-English summary + auto-suggested chart type
 ```
 
+## Flowchart
+```mermaid
+flowchart TD
+
+A[User Connects DB] --> B[User Asks Question]
+
+B --> C{Is Question Clear?}
+
+C -->|No| D[Ask Clarification]
+D --> B
+
+C -->|Yes| E[Create Plan]
+
+E --> F[Generate SQL Query]
+
+F --> G[Validate Query]
+
+G --> H[Run Query on Database]
+
+H --> I[Show Result + Summary + Chart]
+```
+
 ### DataCopilot (Agent Graph)
 
 ```
@@ -45,8 +67,56 @@ Execution Node    → Run nl2sql_tool and/or rag_tool in parallel
 Synthesis Node    → Merge SQL results + RAG citations into one answer
 ```
 
-All agents communicate through a typed `AgentState` dict via LangGraph — no raw document passing between nodes.
+## Flowchart
+```mermaid
+---
+config:
+  theme: redux-dark
+  look: neo
+  layout: fixed
+---
+flowchart TB
+    B["**User Asks Query**"] --> C(["Planner Node"])
+    C --> D{"**Tool Selection**"}
+    D -- NL2SQL --> E1["NL2SQL Tasks"]
+    D -- RAG --> E2["RAG Tasks"]
+    D -- Chat --> E3["Chat Tasks"]
+    D -- NL2SQL + RAG --> E4["Hybrid Tasks"]
+    E1 --> F(["Execution Node"])
+    E2 --> F
+    E3 --> F
+    E4 --> F
+    F --> G["Execute Tools in Parallel<br>- nl2sql_tool<br>- rag_tool<br>- chat_tool"]
+    G --> H(["Synthesizer Node"])
+    H -- Merges Results --> I["**Final Response**<br>- SQL Results<br>- RAG Citations<br>- Unified Answer"]
+    A["User Connects DB + Uploads PDFs"] --> B & n3["Docs"]
+    n2["Database"] --> A
 
+    B@{ shape: rounded}
+    G@{ shape: rounded}
+    A@{ shape: rounded}
+    n3@{ shape: rounded}
+    n2@{ shape: db}
+     C:::bigBold
+     F:::bigBold
+     G:::Ash
+     H:::bigBold
+     A:::Ash
+    classDef bigBold font-size:20px,font-weight:bold
+    classDef Ash stroke-width:1px, stroke-dasharray:none, stroke:#999999, fill:#EEEEEE, color:#000000
+    style B stroke-width:2px,stroke-dasharray:0
+    style C stroke-width:4px,stroke-dasharray:0
+    style E1 stroke-width:2px,stroke-dasharray:2
+    style E2 stroke-width:2px,stroke-dasharray:2
+    style E3 stroke-width:2px,stroke-dasharray:2
+    style E4 stroke-width:2px,stroke-dasharray:2
+    style F stroke-width:4px,stroke-dasharray:0
+    style G stroke-width:0px,stroke-dasharray:0
+    style H stroke-width:4px,stroke-dasharray:0
+    style I stroke-width:2px,stroke-dasharray:0
+    style A stroke-width:0px,stroke-dasharray:0
+    style n2 stroke-width:4px,stroke-dasharray: 0
+```
 ---
 
 ## Quick Start
@@ -167,29 +237,7 @@ NL2SQL-Chatbot-Agent/
 
 ---
 
-## LLM Provider Configuration
 
-Switch providers by setting `LLM_PROVIDER` in `backend/.env`:
-
-```bash
-# HuggingFace (default)
-LLM_PROVIDER=huggingface
-HUGGINGFACEHUB_API_TOKEN=hf_...
-
-# OpenAI
-LLM_PROVIDER=openai
-OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-4o               # optional, default: gpt-4o
-
-# Groq (fast, free tier available)
-LLM_PROVIDER=groq
-GROQ_API_KEY=gsk_...
-GROQ_MODEL=llama-3.3-70b-versatile  # optional
-```
-
-Embeddings follow the same provider selector — OpenAI uses `text-embedding-3-small`, HuggingFace uses `BAAI/bge-small-en-v1.5` via the Inference API.
-
----
 
 ## Key Features
 
@@ -213,135 +261,6 @@ Embeddings follow the same provider selector — OpenAI uses `text-embedding-3-s
 | Confidence scoring | Every citation includes a 0–1 confidence score with a colour-coded bar (green ≥80%, amber 50–79%, red <50%). |
 | Cross-pipeline synthesis | The LangGraph planner automatically routes to both SQL and RAG when needed and synthesizes a single coherent answer. |
 | Grounding check | Synthesis is grounded in retrieved evidence only. If no citation confidence reaches 0.5, a "may not be fully grounded" warning is shown. |
-
----
-
-## API Reference
-
-### Connection
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/test-connection` | Test DB connection, return schema preview |
-| `GET` | `/api/schema-preview` | Live table list for workspace |
-
-### NL2SQL
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/chat-db` | Run NL2SQL pipeline |
-| `POST` | `/api/nl2sql-sessions` | Create new session (server-generated UUID) |
-| `GET` | `/api/nl2sql-sessions` | List all sessions |
-| `GET` | `/api/session-history/{id}` | Restore session with full message history |
-| `PATCH` | `/api/nl2sql-sessions/{id}` | Rename session |
-| `DELETE` | `/api/nl2sql-sessions/{id}` | Delete session and all messages |
-
-### DataCopilot
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/agent-chat` | Run Copilot agent pipeline |
-| `POST` | `/api/create-chat` | Create new Copilot chat |
-| `GET` | `/api/copilot-sessions` | List all Copilot chats |
-| `GET` | `/api/copilot-history/{id}` | Restore chat with full message history |
-| `PATCH` | `/api/copilot-sessions/{id}` | Rename chat |
-| `DELETE` | `/api/copilot-sessions/{id}` | Delete chat |
-
-### Documents
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/upload-doc` | Upload and ingest a PDF |
-| `GET` | `/api/docs` | List all ingested documents |
-| `DELETE` | `/api/docs/{source}` | Delete document and all its chunks |
-
-### Observability
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/metrics` | Aggregated stats: latency, retry rate, SQL error rate, by pipeline / tool / query type |
-
----
-
-## Safety & Token Handling
-
-Every query is validated before touching the database:
-
-```
-Forbidden keywords (DROP, ALTER, TRUNCATE, GRANT, REVOKE) → blocked immediately
-UPDATE / DELETE without WHERE                              → blocked
-Unknown table reference                                    → blocked
-system schema queries (information_schema, pg_catalog)     → always allowed
-scalar queries with no FROM clause                         → always allowed
-```
-
-Token / quota errors from any LLM provider are caught uniformly by `llm/token_error.py` and returned to the frontend as `error_code: TOKEN_LIMIT`, which renders a dedicated banner with retry and billing link buttons.
-
----
-
-## Observability
-
-The metrics middleware logs every request to a `request_logs` table automatically. `GET /api/metrics` returns:
-
-```json
-{
-  "total_requests": 142,
-  "success_rate": 0.944,
-  "avg_latency_ms": 3820.5,
-  "retry_rate": 0.085,
-  "sql_error_rate": 0.042,
-  "by_pipeline": { "nl2sql": { "count": 98, "avg_latency_ms": 4100, "success_rate": 0.93 } },
-  "by_tool": { "nl2sql": 82, "rag": 31, "chat": 12, "synthesis": 29 },
-  "by_query_type": { "SELECT": 74, "INSERT": 8, "UPDATE": 5 },
-  "recent_errors": [...]
-}
-```
-
----
-
-## Running Tests
-
-```bash
-cd backend
-pytest tests/test_nl2sql_pipeline.py -v
-```
-
-The test suite covers:
-
-- `_suggest_chart()` — all chart type branches (pie, bar, line, table, empty, non-SELECT)
-- `clarify_query()` — ambiguous queries, specific queries, follow-ups with context, history formatting
-- `/api/chat-db` endpoint — clarification flow, clarification response bypass, full pipeline success, session auto-creation, validation retry, execution retry, follow-up SQL context passing
-
-```bash
-# Frontend unit tests
-cd frontend
-npm run test
-```
-
----
-
-## Deployment
-
-### Render (backend)
-
-See `render.yaml`. The build command installs CPU-only PyTorch to avoid memory limits:
-
-```yaml
-buildCommand: |
-  pip install torch --index-url https://download.pytorch.org/whl/cpu
-  pip install -r requirements.txt
-startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
-```
-
-### Frontend (Nginx)
-
-The `frontend/Dockerfile` builds a static bundle and serves it via Nginx. The `nginx.conf` proxies `/api/` to `$BACKEND_URL`.
-
-### Database Notes
-
-- Session and chat storage defaults to **SQLite** (`./app.db`) — no configuration needed for development.
-- Set `DATABASE_URL=postgresql://...` in `.env` for production.
-- ChromaDB persists to `./chroma_db/` — mount this as a volume in Docker.
 
 ---
 
