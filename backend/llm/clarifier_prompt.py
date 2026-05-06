@@ -19,6 +19,14 @@ A query is CLEAR if ANY of the following are true:
 - The prior conversation history makes the intent unambiguous
 - A previous SQL query exists and the user is clearly asking for a modification or filter
 
+If the query is ambiguous:
+- Ask a clear follow-up question
+- Include 2–5 answer options directly in the question
+- Format the options as a numbered list
+- Each option should represent a distinct possible interpretation
+- The user should be able to reply with just the option number or text
+- Keep the question concise and relevant to the schema
+
 Database Schema:
 {schema_summary}
 
